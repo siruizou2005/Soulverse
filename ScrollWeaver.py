@@ -97,6 +97,9 @@ class Server():
                                         loc_file_path = loc_file_path,
                                         llm = self.world_llm,
                                         embedding = self.embedding)
+
+        if self.is_soulverse_mode:
+            self._enforce_single_scene()
     
     # Init
     def init_performers(self, 
@@ -141,6 +144,34 @@ class Server():
         for role_code in self.performers:
             self.performers[role_code].world_db = self.orchestrator.db
             self.performers[role_code].world_db_name = self.orchestrator.db_name
+
+    def _enforce_single_scene(self):
+        """强制Soulverse模式仅使用一个场景（闲聊酒会）。"""
+        scene_code = "soulverse_banquet"
+        scene_name = "闲聊酒会"
+        scene_description = "一个持续开放的社交酒会，所有Agent都会在这里交流。"
+        scene_detail = (
+            "闲聊酒会是Soulverse中唯一的公共场景，柔和的灯光、背景音乐与开放式吧台"
+            "让每位来访者都能随时加入话题、分享灵感。"
+        )
+
+        self.orchestrator.locations_info = {
+            scene_code: {
+                "location_code": scene_code,
+                "location_name": scene_name,
+                "description": scene_description,
+                "detail": scene_detail,
+            }
+        }
+        self.orchestrator.locations = [scene_code]
+        self.orchestrator.edges = {}
+        self.current_status["location_code"] = scene_code
+        self.selected_scene = None
+
+        for role_code in self.role_codes:
+            self.performers[role_code].set_location(scene_code, scene_name)
+
+        self.logger.info(f"单场景模式已启用，所有Agent位于 {scene_name}")
         
     def init_role_locations(self, random_allocate: bool = True):
         """
@@ -380,7 +411,7 @@ class Server():
             self.log(f"========== Round {current_round+1} Started ==========")
             if self.event and current_round >= 1:
                 self.log(f"--------- Current Event ---------\n{self.event}\n")
-                yield ("world","","-- Current Event --\n"+self.event, None)
+                yield ("world","","-- Current Event --\n" + (self.event or ""), None)
                 self.event_history.append(self.event)
                 
             if len(self.moving_roles_info) == len(self.role_codes):
@@ -782,7 +813,7 @@ class Server():
         
         for code in instruction:
             if code == "progress":
-                self.log("剧本进度："+ instruction["progress"]) if self.language == "zh" else self.log("Current Stage:"+ instruction["progress"])
+                self.log("剧本进度：" + str(instruction.get("progress", ""))) if self.language == "zh" else self.log("Current Stage:" + str(instruction.get("progress", "")))
             elif code in self.role_codes:
                 # self.performers[code].update_goal(instruction = instruction[code])
                 self.performers[code].goal = instruction[code]
@@ -795,10 +826,11 @@ class Server():
             roles_info_text = self._get_group_members_info_text(self.role_codes,profile=True)
             status_text = self._get_status_text(self.role_codes)
             event = self.orchestrator.generate_event(roles_info_text=roles_info_text,event=self.intervention,history_text=status_text)
-            self.intervention = event
+            # Normalize None to empty string to avoid concatenation errors
+            self.intervention = event if isinstance(event, str) and event is not None else (event or "")
         elif self.intervention == "" and self.script:
-            self.intervention = self.script
-        self.event = self.intervention
+            self.intervention = self.script or ""
+        self.event = self.intervention or ""
         return self.intervention
     
     def get_script(self,):
@@ -877,7 +909,8 @@ class Server():
         }
         self.history_manager.add_record(record)
         for code in group:
-            self.performers[code].record(record)
+            if code in self.performers:
+                self.performers[code].record(record)
     
     def settle_movement(self,):
         for role_code in self.moving_roles_info.copy():
@@ -947,6 +980,17 @@ class Server():
     def _name2code(self,roles):
         name_dic = {self.performers[code].role_name:code for code in self.role_codes}
         name_dic.update({self.performers[code].nickname:code for code in self.role_codes})
+        # helper: fallback suffix-based match like 'user_rdon' -> match '*rdon'
+        def _suffix_match(name: str):
+            if not isinstance(name, str):
+                return None
+            base = name.strip().replace("\n", "").split("_")[-1].lower()
+            for code in self.role_codes:
+                rn = str(self.performers[code].role_name).lower()
+                nn = str(self.performers[code].nickname).lower()
+                if rn.endswith(base) or nn.endswith(base):
+                    return code
+            return None
         if isinstance(roles, list):
             processed_roles = []
             for role in roles:
@@ -959,7 +1003,9 @@ class Server():
                 elif role.replace("_","·") in self.role_codes:
                     processed_roles.append(role.replace("_","·"))
                 else:
-                    processed_roles.append(role)
+                    # Try suffix-based best-effort mapping
+                    matched = _suffix_match(role)
+                    processed_roles.append(matched if matched else role)
             return processed_roles
         elif isinstance(roles, str) :
             roles = roles.replace("\n","")
@@ -973,6 +1019,10 @@ class Server():
                 return name_dic[roles.split("-")[0]]
             elif roles.replace("_","·") in self.role_codes:
                 return roles.replace("_","·")
+            else:
+                matched = _suffix_match(roles)
+                if matched:
+                    return matched
         return roles
     
     def log(self,text):
@@ -1074,6 +1124,10 @@ class ScrollWeaver():
                         role_llm_name=role_llm_name, 
                         embedding_name=embedding_name)
         self.selected_scene = None
+        self.config = getattr(self.server, "config", {})
+        self.role_llm_name = role_llm_name
+        self.world_llm_name = world_llm_name
+        self._analysis_llm = None
         
     def set_generator(self, 
                       rounds:int = 10, 
@@ -1214,7 +1268,7 @@ class ScrollWeaver():
         for record in self.server.history_manager.detailed_history:
             message_type = record["actor_type"]
             code = record["role_code"]
-            if message_type == "role":
+            if message_type == "role" and code in self.server.performers:
                 username = self.server.performers[code].role_name
                 icon_path = self.server.performers[code].icon_path
             else:
@@ -1268,21 +1322,38 @@ class ScrollWeaver():
         """格式化单个Agent的社交报告"""
         agent = self.server.performers.get(agent_code)
         agent_name = agent.nickname if agent else agent_code
-        
+
         stats = story_info.get("stats", {})
         key_events = story_info.get("key_events", [])
         story_text = story_info.get("story_text", "")
-        
+        time_range = story_info.get("time_range") or {}
+        time_range_str = "未知"
+        if time_range.get("start") or time_range.get("end"):
+            start = time_range.get("start", "?")
+            end = time_range.get("end", "?")
+            time_range_str = f"{start} ~ {end}"
+
+        partner_stats = self._build_partner_summaries(agent_code, key_events)
+        match_analysis = self._generate_match_analysis(agent_name, partner_stats)
+
         report_lines = [
             f"# {agent_name} 的社交报告",
-            f"",
-            f"## 统计信息",
+            "",
+            "## 统计信息",
             f"- 总互动次数: {stats.get('total_interactions', 0)}",
             f"- 接触的Agent数量: {stats.get('unique_contacts_count', 0)}",
             f"- 移动次数: {stats.get('total_movements', 0)}",
-            f"- 时间范围: {stats.get('time_range', '未知')}",
-            f"",
+            f"- 时间范围: {time_range_str}",
+            "",
         ]
+
+        if match_analysis:
+            report_lines.extend([
+                "## AI匹配度分析",
+                "",
+                match_analysis,
+                "",
+            ])
         
         if key_events:
             report_lines.extend([
@@ -1307,6 +1378,114 @@ class ScrollWeaver():
             ])
         
         return "\n".join(report_lines)
+
+    def _build_partner_summaries(self, agent_code, key_events):
+        partner_stats = {}
+        for event in key_events:
+            if event.get("type") != "interaction":
+                continue
+            participants = event.get("participants", []) or []
+            detail = event.get("detail", "")
+            for participant in participants:
+                if participant == agent_code:
+                    continue
+                stat = partner_stats.setdefault(participant, {"count": 0, "samples": []})
+                stat["count"] += 1
+                if detail and len(stat["samples"]) < 2:
+                    stat["samples"].append(detail)
+
+        summaries = []
+        for code, info in partner_stats.items():
+            performer = self.server.performers.get(code)
+            name = performer.nickname if performer else code
+            summaries.append({
+                "code": code,
+                "name": name,
+                "count": info["count"],
+                "samples": info["samples"],
+            })
+        summaries.sort(key=lambda item: item["count"], reverse=True)
+        return summaries
+
+    def _generate_match_analysis(self, agent_name: str, partner_stats: List[Dict[str, Any]]) -> str:
+        if not partner_stats:
+            return "暂无足够的互动数据，无法评估匹配度。"
+
+        total_interactions = sum(item["count"] for item in partner_stats)
+        if total_interactions == 0:
+            return "暂无足够的互动数据，无法评估匹配度。"
+
+        analysis_lines = []
+        best_match = None
+        for item in partner_stats:
+            ratio = item["count"] / total_interactions if total_interactions else 0
+            score = min(100, round(55 + ratio * 40 + min(item["count"], 5) * 3))
+            item["score"] = score
+            if not best_match or score > best_match["score"]:
+                best_match = item
+
+        analysis_lines.append("### 潜在社交搭档")
+        for entry in partner_stats[:3]:
+            sample = entry["samples"][0][:80] + ("..." if entry["samples"] and len(entry["samples"][0]) > 80 else "") if entry["samples"] else ""
+            sample_text = f" 示例：{sample}" if sample else ""
+            analysis_lines.append(
+                f"- {entry['name']}：匹配度 {entry['score']} 分（互动 {entry['count']} 次）{sample_text}"
+            )
+
+        if best_match:
+            analysis_lines.append("")
+            analysis_lines.append(
+                f"建议：{agent_name} 与 {best_match['name']} 的互动最频繁，匹配度最高，可优先维系关系并深化话题。"
+            )
+
+        if self.config.get("enable_ai_match_analysis"):
+            ai_comment = self._generate_ai_match_insight(agent_name, partner_stats[:5])
+            if ai_comment:
+                analysis_lines.append("")
+                analysis_lines.append("### AI洞察")
+                analysis_lines.append(ai_comment)
+
+        return "\n".join(analysis_lines)
+
+    def _generate_ai_match_insight(self, agent_name: str, partner_stats: List[Dict[str, Any]]) -> str:
+        if not hasattr(self, 'world_llm_name'):
+            return ""
+        summary_rows = []
+        for entry in partner_stats:
+            sample = entry["samples"][0] if entry["samples"] else ""
+            summary_rows.append(
+                f"- {agent_name} 与 {entry['name']}: 匹配度 {entry['score']} 分, 互动 {entry['count']} 次, 示例: {sample[:120]}"
+            )
+        summary_text = "\n".join(summary_rows)
+        prompt = (
+            "你是一名社交分析顾问，请基于以下互动统计，" 
+            "用中文给出 2-3 句洞察，包含双方关系评估与下一步建议。\n"
+            f"主体: {agent_name}\n" 
+            "互动摘要:\n"
+            f"{summary_text}\n"
+            "要求：务必简洁，不超过80字。"
+        )
+        llm = self._get_analysis_llm()
+        if llm is None:
+            return ""
+        try:
+            result = llm.chat(prompt)
+            return result.strip() if isinstance(result, str) else str(result)
+        except Exception as exc:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"AI匹配度分析失败: {exc}")
+            return ""
+
+    def _get_analysis_llm(self):
+        if self._analysis_llm:
+            return self._analysis_llm
+        try:
+            self._analysis_llm = get_models(self.world_llm_name)
+        except Exception as exc:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"AI匹配度分析模型初始化失败: {exc}")
+            self._analysis_llm = None
+        return self._analysis_llm or getattr(self, 'world_llm', None)
     
     def _format_all_agents_social_report(self, generator):
         """格式化所有Agent的综合社交报告"""

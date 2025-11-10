@@ -85,7 +85,7 @@ class APIPanel {
             alibaba: ['qwen-turbo', 'qwen-max','qwen-plus'],
             openrouter: ['gpt-4o-mini','gpt-4o','gemini-2.0-flash','claude-3.5-sonnet','deepseek-r1']
             ,
-            google: ['gemini-2.0-flash', 'gemini-1.5-flash', 'vertex-gemini:gemini-1.5-pro-002']
+            google: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'vertex-gemini:gemini-1.5-pro-002']
         };
 
         const currentModelValue = this.modelSelect.value;

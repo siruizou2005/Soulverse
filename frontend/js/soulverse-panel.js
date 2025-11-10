@@ -969,6 +969,10 @@ class SoulversePanel {
                 option.textContent = char.name;
                 agentSelect.appendChild(option);
             });
+
+            if (window.characterProfiles) {
+                window.characterProfiles.updateCharacters(characters);
+            }
         };
 
         // 监听WebSocket消息获取角色列表
@@ -1052,4 +1056,3 @@ class SoulversePanel {
 document.addEventListener('DOMContentLoaded', () => {
     window.soulversePanel = new SoulversePanel();
 });
-

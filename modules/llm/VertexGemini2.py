@@ -47,7 +47,7 @@ class VertexGemini(BaseLLM):
         response = self.client.models.generate_content(
             model=self.model_name,
             contents=contents,
-            generation_config={
+            config={
                 "temperature": temperature,
                 "max_output_tokens": max_output_tokens,
             }

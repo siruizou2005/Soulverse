@@ -16,8 +16,6 @@ document.addEventListener('DOMContentLoaded', function() {
     window.ws = ws
 
     let isPlaying = false;
-    // 添加场景相关属性
-    let currentSceneFilter = null;
     let startButtonText =  translations[window.i18n.currentLang]['start'];
     // 全局编辑状态，避免为每条消息注册 document 监听
     let currentEditingMessage = null;
@@ -184,14 +182,6 @@ document.addEventListener('DOMContentLoaded', function() {
             controlBtn.innerHTML = '<i class="fas fa-play"></i><span data-i18n="start">开始</span>';
         }
         else if (message.type === 'message') {
-            // 从状态中获取当前场景编号
-            const sceneNumber = message.data.scene; // 确保消息中包含场景信息
-            if (sceneNumber !== undefined) {
-                // 触发场景更新事件
-                window.dispatchEvent(new CustomEvent('scene-update', {
-                    detail: { scene: sceneNumber }
-                }));
-            }
             if (message.data.type === 'system') {
                 addSystemMessage(message.data.text);
             } 
@@ -348,12 +338,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     
-        // 根据当前场景筛选器决定是否显示
-        if (currentSceneFilter !== null) {
-            messageElement.style.display = 
-                (String(message.scene) === String(currentSceneFilter)) ? '' : 'none';
-        }
-
         chatMessages.appendChild(messageElement);
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -661,6 +645,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (selectedSection) {
             selectedSection.style.display = 'none';
         }
+        document.querySelectorAll('.character-card').forEach(card => card.classList.remove('is-selected'));
         
         // 更新模式指示器
         if (window.soulversePanel && window.soulversePanel.updateModeIndicator) {
@@ -697,15 +682,23 @@ document.addEventListener('DOMContentLoaded', function() {
         // 显示选中区域
         selectedSection.style.display = 'block';
         
-        // 从普通列表中移除选中的角色（可选）
-        const allCards = document.querySelectorAll('.character-card');
-        allCards.forEach(card => {
-            const nameEl = card.querySelector('.character-name');
-            if (nameEl && nameEl.textContent.trim() === (character.name || character.nickname)) {
-                card.style.opacity = '0.5';
-                card.style.border = '2px solid #1e293b';
+        // 高亮对应的角色卡片
+        const highlightCode = character.code || character.role_code || character.name || character.nickname;
+        document.querySelectorAll('.character-card').forEach(card => card.classList.remove('is-selected'));
+        if (highlightCode) {
+            let targetCard = null;
+            if (window.CSS && typeof window.CSS.escape === 'function') {
+                const escaped = window.CSS.escape(String(highlightCode));
+                targetCard = document.querySelector(`.character-card[data-code="${escaped}"]`);
+            } else {
+                targetCard = Array.from(document.querySelectorAll('.character-card')).find(
+                    card => String(card.dataset.code || '') === String(highlightCode)
+                );
             }
-        });
+            if (targetCard) {
+                targetCard.classList.add('is-selected');
+            }
+        }
     }
 
     // 绑定发送按钮点击事件
@@ -801,28 +794,6 @@ document.addEventListener('DOMContentLoaded', function() {
         document.addEventListener('keydown', onKeyDown);
     }
     
-    // 监听场景选择事件
-    window.addEventListener('scene-selected', (event) => {
-        const selectedScene = event.detail.scene;
-        currentSceneFilter = selectedScene;
-        
-        // 更新所有消息的显示状态
-        document.querySelectorAll('.message').forEach(msg => {
-            if (selectedScene === null) {
-                msg.style.display = '';
-            } else {
-                msg.style.display = 
-                    (msg.dataset.scene === String(selectedScene)) ? '' : 'none';
-            }
-        });
-        
-        // 滚动到可见的第一条消息
-        const visibleMessages = document.querySelectorAll('.message[style=""]');
-        if (visibleMessages.length > 0) {
-            visibleMessages[0].scrollIntoView({ behavior: 'smooth' });
-        }
-    });
-
     // 添加导出社交报告按钮的点击事件
     exportStoryBtn.addEventListener('click', function() {
         // 显示加载状态

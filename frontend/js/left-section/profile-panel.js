@@ -27,9 +27,8 @@ class CharacterProfiles {
                     if (message.data.status) this.updateAllStatus(message.data.status);
                 }
 
-                if (message.type === 'scene_characters') {
-                    // 处理服务器返回的场景角色数据
-                    this.updateCharacters(message.data, true);
+                if (message.type === 'characters_list' && message.data.characters) {
+                    this.updateCharacters(message.data.characters);
                 }
 
                 if (message.type === 'status_update') {
@@ -64,7 +63,7 @@ class CharacterProfiles {
         const socialGoalsDisplay = socialGoals.length > 0 ? this.createSocialGoalsSection(socialGoals) : '';
         
         return `
-            <div class="character-card" data-id="${character.id}">
+            <div class="character-card" data-id="${character.id}" data-code="${character.code || ''}">
                 <div class="character-header">
                     <div class="character-name-section">
                         <div class="character-name">${character.name}</div>
@@ -220,28 +219,27 @@ class CharacterProfiles {
         // 原有的卡片点击处理逻辑
         const card = e.target.closest('.character-card');
         if (card) {
+            const characterCode = card.dataset.code;
             const characterId = card.dataset.id;
-            const character = this.characters.find(c => c.id === parseInt(characterId));
+            const character = this.characters.find(c => {
+                const codeMatch = characterCode && String(c.code || c.role_code || '') === String(characterCode);
+                const idMatch = characterId !== undefined && String(c.id) === String(characterId);
+                return codeMatch || idMatch;
+            });
             if (character) {
                 this.showCharacterDetails(character);
             }
         }
     }
-    updateCharacters(charactersData, scene = false) {
-        if (scene) {
-            if (charactersData) {
-                this.renderCharacters(charactersData);
-            }
-            else{
-                this.renderCharacters(this.allCharacters);
-            }
+    updateCharacters(charactersData) {
+        if (!charactersData) {
+            this.characters = [];
+            this.renderCharacters([]);
+            return;
         }
-        else {
-            this.characters = charactersData;
-            this.allCharacters = [...charactersData];
-            this.renderCharacters(this.characters);
-        }
-
+        this.characters = charactersData;
+        this.allCharacters = [...charactersData];
+        this.renderCharacters(this.characters);
     }
     renderCharacters(characters) {
         const container = document.querySelector('.profiles-container');

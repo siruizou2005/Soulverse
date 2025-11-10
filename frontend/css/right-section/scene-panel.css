@@ -1,64 +1,31 @@
 .scenes-container {
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
-    padding: 15px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+    gap: 12px;
 }
 
-.scenes-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.single-scene-card {
+    background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+    border: 1px solid #cbd5f5;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
 }
 
-.scenes-header h3 {
-    color: #5f3737;
-    margin: 0;
+.single-scene-card h3 {
+    margin: 0 0 8px 0;
+    font-size: 1.05em;
+    color: #312e81;
 }
 
-.clear-selection-btn {
-    padding: 5px 10px;
-    background-color: #5f3737;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
+.single-scene-card p {
+    margin: 6px 0;
+    color: #4c1d95;
+    line-height: 1.6;
+}
+
+.scene-detail {
     font-size: 0.9em;
+    color: #5b21b6;
 }
-
-.clear-selection-btn:hover {
-    background-color: #7a4747;
-}
-
-.scene-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-}
-
-.scene-btn {
-    padding: 8px 15px;
-    background-color: #fdf5ee;
-    border: 1px solid #5f3737;
-    border-radius: 4px;
-    color: #5f3737;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.scene-btn:hover {
-    background-color: #5f3737;
-    color: white;
-}
-
-.scene-btn.active {
-    background-color: #5f3737;
-    color: white;
-}
-

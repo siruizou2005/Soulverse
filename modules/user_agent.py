@@ -128,14 +128,23 @@ class UserAgent(Performer):
         Returns:
             角色信息字典
         """
-        # 生成角色名称（基于用户ID或随机生成）
-        role_name = f"用户_{self.user_id[-4:]}" if len(self.user_id) >= 4 else f"用户_{role_code}"
+        # 生成角色名称：默认展示完整用户ID，确保不会丢失首字母/单词
+        base_name = (self.user_id or "").strip()
+        if not base_name:
+            base_name = role_code
+        # 统一使用下划线替换空白，避免 UI 中首字符被隐藏
+        sanitized_name = base_name.replace(" ", "_")
+        if sanitized_name.startswith("用户_") or sanitized_name.startswith("用户"):
+            role_name = sanitized_name
+        else:
+            role_name = f"用户_{sanitized_name}"
         nickname = role_name
         
         role_info = {
             "role_code": role_code,
             "role_name": role_name,
             "nickname": nickname,
+            "original_user_id": self.user_id,
             "source": "soulverse_user",
             "activity": soul_profile.get("activity_level", 1.0),
             "profile": profile,
@@ -239,4 +248,3 @@ class UserAgent(Performer):
             self.motivation = motivation
         
         return motivation
-

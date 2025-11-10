@@ -664,14 +664,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     new_text=edit_data['text']
                 )
                 
-            elif message['type'] == 'request_scene_characters':
-                manager.scrollweaver.select_scene(message['scene'])
-                scene_characters = manager.scrollweaver.get_characters_info()
-                await websocket.send_json({
-                    'type': 'scene_characters',
-                    'data': scene_characters
-                })
-                
             elif message['type'] == 'auto_complete':
                 # 处理AI自动完成请求
                 if client_id in manager.waiting_for_input and manager.waiting_for_input[client_id]:

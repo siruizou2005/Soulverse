@@ -100,9 +100,9 @@ def get_models(model_name):
         elif model_name.startswith('gemini-1.5'):
             return Gemini(model="gemini-1.5-flash")
         elif model_name.startswith('gemini-2.5-flash'):
-            return Gemini(model="gemini-2.5-flash-preview-04-17")
+            return Gemini(model="gemini-2.5-flash")
         elif model_name.startswith('gemini-2.5-pro'):
-            return Gemini(model="gemini-2.5-pro-preview-05-06")
+            return Gemini(model="gemini-2.5-pro")
         return Gemini()
     else:
         print(f'Warning! undefined model {model_name}, use gpt-4o-mini instead.')
