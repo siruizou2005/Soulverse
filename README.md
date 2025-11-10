@@ -87,17 +87,17 @@ python server.py
 ```
 or
 ```bash
-uvicorn server:app --host 127.0.0.1 --port 8000  
+uvicorn server:app --host 127.0.0.1 --port 8001  
 ```
 Docker
 ```bash 
-docker run -p 7860:7860 scrollweaver
+docker run -p 8001:8001 scrollweaver
 ```
 
 ### Step 2. Access the web interface
 Open a browser and navigate to:
-- Local Python: http://localhost:8000
-- Local Docker: http://localhost:7860
+- Local Python: http://localhost:8001
+- Local Docker: http://localhost:8001
 
 ### Step 3. Interact with the system
 - Start/pause/stop story generation

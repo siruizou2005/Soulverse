@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const controlBtn = document.getElementById('controlBtn');
     const stopBtn = document.getElementById('stopBtn');
     const exportStoryBtn = document.getElementById('exportStoryBtn');
+    const resetAllBtn = document.getElementById('resetAllBtn');
     
     // 生成随机的客户端ID
     const clientId = Math.random().toString(36).substring(7);
@@ -76,6 +77,27 @@ document.addEventListener('DOMContentLoaded', function() {
     ws.onmessage = function(event) {
         const message = JSON.parse(event.data);
         console.log('Received message:', message);
+        
+        // 处理系统重置消息（优先处理）
+        if (message.type === 'system_reset') {
+            addSystemMessage(message.message || '系统已重置');
+            // 清空聊天记录
+            if (chatMessages) {
+                chatMessages.innerHTML = '';
+            }
+            // 重置UI状态
+            isPlaying = false;
+            waitingForInput = false;
+            selectedRoleName = null;
+            window.selectedRoleName = null;
+            controlBtn.innerHTML = '<i class="fas fa-play"></i><span data-i18n="start">开始</span>';
+            // 延迟重新加载页面以完全重置状态
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+            return;
+        }
+        
         // 创建自定义事件来分发 WebSocket 消息
         const wsEvent = new CustomEvent('websocket-message', {
             detail: message
@@ -904,6 +926,67 @@ document.addEventListener('DOMContentLoaded', function() {
         }));
         }
     });
+    
+    // 添加重置所有按钮的点击事件
+    if (resetAllBtn) {
+        resetAllBtn.addEventListener('click', function() {
+            // 显示确认对话框
+            if (confirm('确定要重置所有内容吗？\n\n这将清除：\n- 所有创建的Agent\n- 所有历史记录\n- 所有聊天记录\n\n此操作无法撤销！')) {
+                // 用户确认后执行重置
+                resetAllBtn.disabled = true;
+                resetAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>重置中...</span>';
+                
+                // 调用后端API
+                fetch('/api/reset-all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // 清空聊天记录
+                        if (chatMessages) {
+                            chatMessages.innerHTML = '';
+                        }
+                        
+                        // 重置UI状态
+                        isPlaying = false;
+                        waitingForInput = false;
+                        selectedRoleName = null;
+                        window.selectedRoleName = null;
+                        
+                        // 更新控制按钮
+                        controlBtn.innerHTML = '<i class="fas fa-play"></i><span data-i18n="start">开始</span>';
+                        
+                        // 清除角色选择
+                        if (typeof clearRoleSelection === 'function') {
+                            clearRoleSelection();
+                        }
+                        
+                        // 显示系统消息
+                        addSystemMessage('系统已重置，所有数据已清除');
+                        
+                        // 重新加载页面以完全重置状态
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1500);
+                    } else {
+                        throw new Error(data.message || '重置失败');
+                    }
+                })
+                .catch(error => {
+                    console.error('重置失败:', error);
+                    alert('重置失败：' + error.message);
+                    
+                    // 恢复按钮状态
+                    resetAllBtn.disabled = false;
+                    resetAllBtn.innerHTML = '<i class="fas fa-trash-alt"></i><span data-i18n="resetAll">重置所有</span>';
+                });
+            }
+        });
+    }
     
     // 显示故事模态框
     function showStoryModal(storyText, timestamp) {

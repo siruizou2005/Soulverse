@@ -8,11 +8,11 @@ python server.py
 ```
 或
 ```bash
-uvicorn server:app --host 0.0.0.0 --port 8000
+uvicorn server:app --host 0.0.0.0 --port 8001
 ```
 
 ### 2. 打开浏览器
-访问 `http://localhost:8000`
+访问 `http://localhost:8001`
 
 ## 核心功能使用
 

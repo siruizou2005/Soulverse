@@ -1205,5 +1205,130 @@ async def get_daily_report(agent_code: str, date: str = None):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/reset-all")
+async def reset_all():
+    """重置所有内容：清除所有soulverse角色数据和状态"""
+    try:
+        import shutil
+        
+        # 1. 停止所有正在运行的任务
+        for client_id in list(manager.story_tasks.keys()):
+            task = manager.story_tasks.get(client_id)
+            if task and not task.done():
+                task.cancel()
+        
+        # 2. 清除所有WebSocket连接的状态
+        manager.story_tasks.clear()
+        manager.user_selected_roles.clear()
+        manager.waiting_for_input.clear()
+        manager.pending_user_inputs.clear()
+        manager.possession_mode.clear()
+        manager.user_agents.clear()
+        manager.pending_display_message.clear()
+        
+        # 3. 清除soulverse运行时创建的角色数据目录
+        # 注意：
+        # - 只删除运行时创建的角色实例（soulverse_npcs 和 soulverse_users）
+        # - 不删除预设模板（预设Agent模板在代码modules/preset_agents.py中）
+        # - 不删除预设配置文件（experiment_presets/目录下的JSON文件）
+        # - 不删除其他预设角色（如A_Dream_in_Red_Mansions、A_Song_of_Ice_and_Fire等）
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        soulverse_npcs_dir = os.path.join(base_dir, "data", "roles", "soulverse_npcs")
+        soulverse_users_dir = os.path.join(base_dir, "data", "roles", "soulverse_users")
+        
+        # 安全地清除目录内容，保留目录结构
+        # 这样不会影响预设模板、预设配置文件或其他预设角色
+        try:
+            if os.path.exists(soulverse_npcs_dir):
+                # 删除目录内的所有文件和子目录，但保留目录本身
+                items = os.listdir(soulverse_npcs_dir)
+                for item in items:
+                    item_path = os.path.join(soulverse_npcs_dir, item)
+                    try:
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                        elif os.path.isfile(item_path):
+                            os.remove(item_path)
+                    except Exception as e:
+                        print(f"Warning: 无法删除 {item_path}: {e}")
+                print(f"已清除NPC Agent实例: {soulverse_npcs_dir}")
+            else:
+                os.makedirs(soulverse_npcs_dir, exist_ok=True)
+        except Exception as e:
+            print(f"Error clearing soulverse_npcs directory: {e}")
+        
+        try:
+            if os.path.exists(soulverse_users_dir):
+                # 删除目录内的所有文件和子目录，但保留目录本身
+                items = os.listdir(soulverse_users_dir)
+                for item in items:
+                    item_path = os.path.join(soulverse_users_dir, item)
+                    try:
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                        elif os.path.isfile(item_path):
+                            os.remove(item_path)
+                    except Exception as e:
+                        print(f"Warning: 无法删除 {item_path}: {e}")
+                print(f"已清除用户Agent实例: {soulverse_users_dir}")
+            else:
+                os.makedirs(soulverse_users_dir, exist_ok=True)
+        except Exception as e:
+            print(f"Error clearing soulverse_users directory: {e}")
+        
+        # 4. 重新初始化ScrollWeaver实例
+        if "preset_path" in config and config["preset_path"]:
+            if os.path.exists(config["preset_path"]):
+                preset_path = config["preset_path"]
+            else:
+                raise ValueError(f"The preset path {config['preset_path']} does not exist.")
+        elif "genre" in config and config["genre"]:
+            genre = config["genre"]
+            preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),f"./config/experiment_{genre}.json")
+        else:
+            preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                      'experiment_presets/soulverse_sandbox.json')
+            if not os.path.exists(preset_path):
+                print(f"Warning: Soulverse preset not found, using default.")
+        
+        # 重新创建ScrollWeaver实例
+        manager.scrollweaver = ScrollWeaver(
+            preset_path=preset_path,
+            world_llm_name=config["world_llm_name"],
+            role_llm_name=config["role_llm_name"],
+            embedding_name=config["embedding_model_name"]
+        )
+        
+        # 设置生成器
+        rounds = config.get("rounds", 100) if manager.scrollweaver.server.is_soulverse_mode else config.get("rounds", 10)
+        manager.scrollweaver.set_generator(
+            rounds=rounds,
+            save_dir=config.get("save_dir", ""),
+            if_save=config.get("if_save", 0),
+            mode="free",
+            scene_mode=config.get("scene_mode", 1)
+        )
+        
+        # 5. 通知所有连接的客户端重置
+        for client_id, websocket in list(manager.active_connections.items()):
+            try:
+                await websocket.send_json({
+                    "type": "system_reset",
+                    "message": "系统已重置，所有数据已清除"
+                })
+            except Exception as e:
+                print(f"Error sending reset message to {client_id}: {e}")
+        
+        return {
+            "success": True,
+            "message": "所有内容已成功重置"
+        }
+        
+    except Exception as e:
+        print(f"Error resetting all: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)
