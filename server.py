@@ -9,6 +9,12 @@ from pathlib import Path
 from datetime import datetime
 from sw_utils import is_image, load_json_file
 from ScrollWeaver import ScrollWeaver
+from modules.social_story_generator import SocialStoryGenerator, generate_social_story
+from modules.daily_report import DailyReportGenerator, generate_daily_report
+from modules.soul_api_mock import get_soul_profile
+from modules.profile_extractor import ProfileExtractor, extract_profile_from_text, extract_profile_from_qa
+from modules.preset_agents import PresetAgents
+from fastapi import UploadFile, File, Form
 
 app = FastAPI()
 default_icon_path = './frontend/assets/images/default-icon.jpg'
@@ -33,7 +39,9 @@ class ConnectionManager:
         self.story_tasks: dict[str, asyncio.Task] = {}
         self.user_selected_roles: dict[str, str] = {}  # client_id -> role_code
         self.waiting_for_input: dict[str, bool] = {}  # client_id -> bool
-        self.pending_user_inputs: dict[str, asyncio.Future] = {}  # client_id -> Future  
+        self.pending_user_inputs: dict[str, asyncio.Future] = {}  # client_id -> Future
+        self.possession_mode: dict[str, bool] = {}  # client_id -> bool (是否处于灵魂降临模式)
+        self.user_agents: dict[str, str] = {}  # user_id -> role_code (用户ID到Agent代码的映射)  
         if True:
             if "preset_path" in config and config["preset_path"]:
                 if os.path.exists(config["preset_path"]):
@@ -44,19 +52,85 @@ class ConnectionManager:
                 genre = config["genre"]
                 preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),f"./config/experiment_{genre}.json")
             else:
-                raise ValueError("Please set the preset_path in `config.json`.")
+                # 如果没有预设路径，使用Soulverse默认配置
+                preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                          'experiment_presets/soulverse_sandbox.json')
+                if not os.path.exists(preset_path):
+                    # 如果Soulverse预设不存在，创建一个
+                    print(f"Warning: Soulverse preset not found, using default.")
+            
             self.scrollweaver = ScrollWeaver(preset_path = preset_path,
                     world_llm_name = config["world_llm_name"],
                     role_llm_name = config["role_llm_name"],
                     embedding_name = config["embedding_model_name"])
-            self.scrollweaver.set_generator(rounds = config["rounds"], 
-                        save_dir = config["save_dir"], 
-                        if_save = config["if_save"],
-                        mode = config["mode"],
-                        scene_mode = config["scene_mode"],)
+            
+            # Soulverse模式：使用更大的rounds值支持持续运行
+            rounds = config.get("rounds", 100) if self.scrollweaver.server.is_soulverse_mode else config.get("rounds", 10)
+            
+            self.scrollweaver.set_generator(rounds = rounds, 
+                        save_dir = config.get("save_dir", ""), 
+                        if_save = config.get("if_save", 0),
+                        mode = "free",  # Soulverse模式强制使用free模式
+                        scene_mode = config.get("scene_mode", 1),)
+            
+            # Soulverse模式不再自动创建预设Agent，用户需要自己创建
+            # if self.scrollweaver.server.is_soulverse_mode:
+            #     self._init_default_agents()
         else:
             from ScrollWeaver_test import ScrollWeaver_test
             self.scrollweaver = ScrollWeaver_test()
+    
+    def _init_default_agents(self):
+        """初始化预设的示例Agent"""
+        try:
+            # 预设Agent配置
+            default_agents = [
+                {
+                    "user_id": "demo_user_001",
+                    "role_code": "demo_agent_001",
+                    "interests": ["电影", "音乐", "阅读", "旅行", "摄影"],
+                    "mbti": "INFP",
+                    "social_goals": ["寻找志同道合的朋友", "讨论电影和文学"]
+                },
+                {
+                    "user_id": "demo_user_002",
+                    "role_code": "demo_agent_002",
+                    "interests": ["游戏", "动漫", "科技", "编程", "AI"],
+                    "mbti": "INTP",
+                    "social_goals": ["寻找游戏搭子", "讨论科技话题"]
+                },
+                {
+                    "user_id": "demo_user_003",
+                    "role_code": "demo_agent_003",
+                    "interests": ["运动", "健身", "旅行", "美食", "咖啡"],
+                    "mbti": "ESFP",
+                    "social_goals": ["寻找运动伙伴", "寻找旅行伙伴"]
+                }
+            ]
+            
+            for agent_config in default_agents:
+                try:
+                    soul_profile = get_soul_profile(
+                        user_id=agent_config["user_id"],
+                        interests=agent_config["interests"],
+                        mbti=agent_config["mbti"]
+                    )
+                    # 覆盖社交目标
+                    soul_profile["social_goals"] = agent_config["social_goals"]
+                    
+                    user_agent = self.scrollweaver.server.add_user_agent(
+                        user_id=agent_config["user_id"],
+                        role_code=agent_config["role_code"],
+                        soul_profile=soul_profile
+                    )
+                    self.user_agents[agent_config["user_id"]] = agent_config["role_code"]
+                    print(f"预设Agent已创建: {user_agent.nickname} ({agent_config['role_code']})")
+                except Exception as e:
+                    print(f"创建预设Agent失败 {agent_config['role_code']}: {e}")
+        except Exception as e:
+            print(f"初始化预设Agent时出错: {e}")
+            import traceback
+            traceback.print_exc()
           
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
@@ -107,14 +181,17 @@ class ConnectionManager:
                         })
                         break
                     
-                    # 检查是否轮到用户选择的角色
+                    # 检查是否轮到用户选择的角色（观察者模式或灵魂降临模式）
                     user_role_code = self.user_selected_roles.get(client_id)
+                    is_possession_mode = self.possession_mode.get(client_id, False)
+                    
                     if user_role_code and message.get('type') == 'role':
                         # 检查当前消息的角色代码是否匹配用户选择的角色
                         # 需要通过角色名称找到角色代码
                         current_role_code = self._get_role_code_by_name(message.get('username', ''))
                         
                         if current_role_code and current_role_code == user_role_code:
+                            # 如果是灵魂降临模式，总是等待用户输入；否则只在观察者模式等待
                             # 暂停生成，等待用户输入
                             self.waiting_for_input[client_id] = True
                             await self.active_connections[client_id].send_json({
@@ -514,12 +591,17 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     role_code = manager._get_role_code_by_name(role_name)
                     if role_code:
                         manager.user_selected_roles[client_id] = role_code
+                        # 检查是否是用户Agent（灵魂降临模式）
+                        is_user_agent = role_code in manager.user_agents.values()
+                        manager.possession_mode[client_id] = is_user_agent
+                        
                         await websocket.send_json({
                             'type': 'role_selected',
                             'data': {
                                 'role_name': role_name,
                                 'role_code': role_code,
-                                'message': f'已选择角色: {role_name}'
+                                'message': f'已选择角色: {role_name}',
+                                'possession_mode': is_user_agent
                             }
                         })
                     else:
@@ -529,6 +611,29 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 'message': f'未找到角色: {role_name}'
                             }
                         })
+            
+            elif message['type'] == 'clear_role_selection':
+                # 清除角色选择
+                if client_id in manager.user_selected_roles:
+                    del manager.user_selected_roles[client_id]
+                if client_id in manager.possession_mode:
+                    del manager.possession_mode[client_id]
+                await websocket.send_json({
+                    'type': 'role_selection_cleared',
+                    'data': {
+                        'message': '已取消角色选择'
+                    }
+                })
+            
+            elif message['type'] == 'toggle_possession':
+                # 切换灵魂降临模式（已废弃，模式由角色选择自动决定）
+                # 保留此消息类型以兼容旧代码，但不执行实际操作
+                await websocket.send_json({
+                    'type': 'error',
+                    'data': {
+                        'message': '模式切换已废弃，请通过选择/取消选择角色来切换模式'
+                    }
+                })
             
             elif message['type'] == 'request_characters':
                 # 请求角色列表
@@ -639,26 +744,28 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         'data': {'message': '当前不在等待输入状态'}
                     })
             
-            elif message['type'] == 'generate_story':
-                # 生成故事文本
+            elif message['type'] == 'generate_story' or message['type'] == 'generate_social_report':
+                # 生成社交报告（Soulverse模式）或故事（传统模式）
                 try:
-                    story_text = manager.scrollweaver.generate_story()
-                    # 发送生成的故事
+                    agent_code = message.get('agent_code')  # 可选，指定Agent
+                    report_text = manager.scrollweaver.generate_social_report(agent_code=agent_code)
+                    # 发送生成的报告
                     await websocket.send_json({
-                        'type': 'story_exported',
+                        'type': 'social_report_exported',
                         'data': {
-                            'story': story_text,
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            'report': report_text,
+                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'agent_code': agent_code
                         }
                     })
                 except Exception as e:
-                    print(f"Error generating story: {e}")
+                    print(f"Error generating social report: {e}")
                     import traceback
                     traceback.print_exc()
                     await websocket.send_json({
                         'type': 'error',
                         'data': {
-                            'message': f'生成故事时出错: {str(e)}'
+                            'message': f'生成社交报告时出错: {str(e)}'
                         }
                     })
                 
@@ -672,6 +779,334 @@ async def save_config(request: Request):
     # Disabled: front-end configuration is no longer supported for security reasons.
     # All configuration should be edited in the server-side config.json file and the service restarted.
     raise HTTPException(status_code=403, detail="前端配置已禁用。请在服务器上编辑 config.json 并重启服务以更改配置。")
+
+@app.post("/api/create-user-agent")
+async def create_user_agent(request: Request):
+    """创建用户Agent"""
+    try:
+        data = await request.json()
+        user_id = data.get('user_id')
+        role_code = data.get('role_code')
+        soul_profile_data = data.get('soul_profile')  # 可选，如果提供则使用
+        
+        if not user_id or not role_code:
+            raise HTTPException(status_code=400, detail="user_id and role_code are required")
+        
+        # 获取Soul画像（如果未提供）
+        if soul_profile_data is None:
+            soul_profile_data = get_soul_profile(user_id=user_id)
+        
+        # 创建用户Agent
+        user_agent = manager.scrollweaver.server.add_user_agent(
+            user_id=user_id,
+            role_code=role_code,
+            soul_profile=soul_profile_data
+        )
+        
+        # 记录用户Agent映射
+        manager.user_agents[user_id] = role_code
+        
+        return {
+            "success": True,
+            "agent_info": {
+                "role_code": role_code,
+                "role_name": user_agent.role_name,
+                "nickname": user_agent.nickname,
+                "location": user_agent.location_name,
+                "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error creating user agent: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/create-agent-from-text")
+async def create_agent_from_text(request: Request):
+    """从文本（聊天记录、自述等）创建用户Agent"""
+    try:
+        data = await request.json()
+        user_id = data.get('user_id')
+        text = data.get('text')
+        role_code = data.get('role_code')
+        
+        if not user_id or not text:
+            raise HTTPException(status_code=400, detail="user_id and text are required")
+        
+        if not role_code:
+            # 自动生成role_code
+            role_code = f"user_agent_{user_id}_{int(datetime.now().timestamp())}"
+        
+        # 从文本提取用户画像
+        extractor = ProfileExtractor(
+            llm_name=config.get("role_llm_name", "gpt-4o-mini"),
+            language=config.get("language", "zh")
+        )
+        soul_profile = extractor.extract_profile_from_text(text)
+        soul_profile["user_id"] = user_id
+        
+        # 创建用户Agent
+        user_agent = manager.scrollweaver.server.add_user_agent(
+            user_id=user_id,
+            role_code=role_code,
+            soul_profile=soul_profile
+        )
+        
+        # 记录用户Agent映射
+        manager.user_agents[user_id] = role_code
+        
+        return {
+            "success": True,
+            "agent_info": {
+                "role_code": role_code,
+                "role_name": user_agent.role_name,
+                "nickname": user_agent.nickname,
+                "location": user_agent.location_name,
+                "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile,
+                "extracted_profile": soul_profile
+            }
+        }
+    except Exception as e:
+        print(f"Error creating agent from text: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/create-agent-from-file")
+async def create_agent_from_file(
+    file: UploadFile = File(...),
+    user_id: str = Form(None),
+    role_code: str = Form(None)
+):
+    """从上传的文件（聊天记录、自述等）创建用户Agent"""
+    try:
+        if not user_id:
+            # 从文件名生成user_id
+            user_id = f"user_{int(datetime.now().timestamp())}"
+        
+        if not role_code:
+            role_code = f"user_agent_{user_id}_{int(datetime.now().timestamp())}"
+        
+        # 读取文件内容
+        content = await file.read()
+        text = content.decode('utf-8')
+        
+        # 从文本提取用户画像
+        extractor = ProfileExtractor(
+            llm_name=config.get("role_llm_name", "gpt-4o-mini"),
+            language=config.get("language", "zh")
+        )
+        soul_profile = extractor.extract_profile_from_text(text)
+        soul_profile["user_id"] = user_id
+        
+        # 创建用户Agent
+        user_agent = manager.scrollweaver.server.add_user_agent(
+            user_id=user_id,
+            role_code=role_code,
+            soul_profile=soul_profile
+        )
+        
+        # 记录用户Agent映射
+        manager.user_agents[user_id] = role_code
+        
+        return {
+            "success": True,
+            "agent_info": {
+                "role_code": role_code,
+                "role_name": user_agent.role_name,
+                "nickname": user_agent.nickname,
+                "location": user_agent.location_name,
+                "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile,
+                "extracted_profile": soul_profile
+            }
+        }
+    except Exception as e:
+        print(f"Error creating agent from file: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/create-agent-from-qa")
+async def create_agent_from_qa(request: Request):
+    """通过问答方式创建用户Agent"""
+    try:
+        data = await request.json()
+        user_id = data.get('user_id')
+        answers = data.get('answers')  # 问答字典
+        role_code = data.get('role_code')
+        
+        if not user_id or not answers:
+            raise HTTPException(status_code=400, detail="user_id and answers are required")
+        
+        if not role_code:
+            role_code = f"user_agent_{user_id}_{int(datetime.now().timestamp())}"
+        
+        # 从问答结果提取用户画像
+        extractor = ProfileExtractor(
+            llm_name=config.get("role_llm_name", "gpt-4o-mini"),
+            language=config.get("language", "zh")
+        )
+        soul_profile = extractor.extract_profile_from_qa(answers)
+        soul_profile["user_id"] = user_id
+        
+        # 创建用户Agent
+        user_agent = manager.scrollweaver.server.add_user_agent(
+            user_id=user_id,
+            role_code=role_code,
+            soul_profile=soul_profile
+        )
+        
+        # 记录用户Agent映射
+        manager.user_agents[user_id] = role_code
+        
+        return {
+            "success": True,
+            "agent_info": {
+                "role_code": role_code,
+                "role_name": user_agent.role_name,
+                "nickname": user_agent.nickname,
+                "location": user_agent.location_name,
+                "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile,
+                "extracted_profile": soul_profile
+            }
+        }
+    except Exception as e:
+        print(f"Error creating agent from QA: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/get-social-story/{agent_code}")
+async def get_social_story(agent_code: str, hours: int = 24):
+    """获取Agent的社交故事（观察者模式）"""
+    try:
+        history_manager = manager.scrollweaver.server.history_manager
+        language = manager.scrollweaver.server.language
+        
+        story_info = generate_social_story(
+            history_manager=history_manager,
+            agent_code=agent_code,
+            language=language,
+            time_range_hours=hours
+        )
+        
+        return {
+            "success": True,
+            "data": story_info
+        }
+    except Exception as e:
+        print(f"Error getting social story: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/list-preset-agents")
+async def list_preset_agents():
+    """获取所有预设Agent模板列表"""
+    try:
+        templates = PresetAgents.get_preset_templates()
+        return {
+            "success": True,
+            "templates": templates
+        }
+    except Exception as e:
+        print(f"Error listing preset agents: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/add-preset-npc")
+async def add_preset_npc(request: Request):
+    """从预设模板添加NPC Agent（用于与用户Agent社交）"""
+    try:
+        data = await request.json()
+        preset_id = data.get('preset_id')
+        custom_name = data.get('custom_name')
+        role_code = data.get('role_code')
+        
+        if not preset_id:
+            raise HTTPException(status_code=400, detail="preset_id is required")
+        
+        # 获取预设模板
+        preset_template = PresetAgents.get_preset_by_id(preset_id)
+        if not preset_template:
+            raise HTTPException(status_code=404, detail=f"Preset {preset_id} not found")
+        
+        # 使用自定义名称或预设名称
+        role_name = custom_name if custom_name and custom_name.strip() else preset_template["name"]
+        
+        if not role_code:
+            role_code = f"npc_{preset_id}_{int(datetime.now().timestamp())}"
+        
+        # 创建NPC Agent（不是用户Agent）
+        npc_agent = manager.scrollweaver.server.add_npc_agent(
+            role_code=role_code,
+            role_name=role_name,
+            preset_config=preset_template
+        )
+        
+        return {
+            "success": True,
+            "agent_info": {
+                "role_code": role_code,
+                "role_name": npc_agent.role_name,
+                "nickname": npc_agent.nickname,
+                "location": npc_agent.location_name,
+                "profile": npc_agent.role_profile[:200] + "..." if len(npc_agent.role_profile) > 200 else npc_agent.role_profile,
+                "preset_info": {
+                    "preset_id": preset_id,
+                    "preset_name": preset_template["name"]
+                },
+                "is_npc": True
+            }
+        }
+    except Exception as e:
+        print(f"Error adding preset NPC: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/get-daily-report/{agent_code}")
+async def get_daily_report(agent_code: str, date: str = None):
+    """获取Agent的社交日报"""
+    try:
+        history_manager = manager.scrollweaver.server.history_manager
+        language = manager.scrollweaver.server.language
+        
+        # 解析日期
+        report_date = None
+        if date:
+            try:
+                report_date = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        
+        report = generate_daily_report(
+            history_manager=history_manager,
+            agent_code=agent_code,
+            date=report_date,
+            language=language
+        )
+        
+        # 生成文本格式
+        generator = DailyReportGenerator(history_manager, language)
+        report_text = generator.generate_report_text(report)
+        
+        return {
+            "success": True,
+            "data": {
+                **report,
+                "report_text": report_text
+            }
+        }
+    except Exception as e:
+        print(f"Error getting daily report: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

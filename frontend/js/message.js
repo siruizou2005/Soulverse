@@ -140,8 +140,10 @@ document.addEventListener('DOMContentLoaded', function() {
             // 收到角色列表，更新本地数据
             if (window.characterProfiles && message.data.characters) {
                 window.characterProfiles.updateCharacters(message.data.characters);
-                // 提示用户可以重新选择
-                addSystemMessage('角色列表已更新，请重新点击"选择角色"按钮');
+            }
+            // 同时更新Soulverse面板的Agent列表
+            if (window.soulversePanel && typeof window.soulversePanel.updateAgentListFromData === 'function') {
+                window.soulversePanel.updateAgentListFromData(message.data.characters);
             }
         }
         else if (message.type === 'error') {
@@ -153,9 +155,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 autoCompleteBtn.style.opacity = '1';
             }
         }
-        else if (message.type === 'story_exported') {
-            // 故事导出成功
-            showStoryModal(message.data.story, message.data.timestamp);
+        else if (message.type === 'story_exported' || message.type === 'social_report_exported') {
+            // 社交报告导出成功
+            const reportText = message.data.report || message.data.story;
+            showStoryModal(reportText, message.data.timestamp);
+            
+            // 恢复按钮状态
+            if (exportStoryBtn) {
+                exportStoryBtn.disabled = false;
+                exportStoryBtn.innerHTML = '<i class="fas fa-file-alt"></i><span data-i18n="exportSocialReport">导出社交报告</span>';
+            }
         }
         else if (message.type === 'auto_complete_options') {
             // AI生成了多个选项
@@ -430,8 +439,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
+        // 过滤：只显示用户创建的Agent（is_user_agent === true）
+        profiles = profiles.filter(char => char.is_user_agent === true);
+        
         console.log('角色选择 - window.characterProfiles:', window.characterProfiles);
-        console.log('角色选择 - profiles from characterProfiles:', profiles.length);
+        console.log('角色选择 - filtered user agents:', profiles.length);
         
         // 如果还没有，从DOM中获取
         if (profiles.length === 0) {
@@ -479,15 +491,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
         
-        if (profiles.length === 0) {
-            // 从服务器请求
-            ws.send(JSON.stringify({
-                type: 'request_characters'
-            }));
-            alert('正在加载角色列表，请稍后再试');
-            return;
-        }
-        
         // 显示模态框
         const modal = document.getElementById('role-select-modal');
         const container = document.getElementById('roleCardsContainer');
@@ -499,6 +502,41 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // 清空容器
         container.innerHTML = '';
+        
+        if (profiles.length === 0) {
+            // 显示空状态提示
+            container.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: #64748b;">
+                    <div style="font-size: 48px; margin-bottom: 16px;">👤</div>
+                    <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #334155;">还没有你的Agent</div>
+                    <div style="font-size: 14px; margin-bottom: 20px;">请先在右侧"Soulverse"标签中创建你的Agent</div>
+                    <div style="font-size: 12px; color: #94a3b8;">只有你创建的Agent才能被选择进行"灵魂降临"</div>
+                </div>
+            `;
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            
+            // 设置关闭事件
+            const closeBtn = modal.querySelector('.modal-close');
+            const overlay = modal.querySelector('.modal-overlay');
+            
+            function closeModal() {
+                modal.classList.add('hidden');
+                modal.setAttribute('aria-hidden', 'true');
+                closeBtn.removeEventListener('click', closeModal);
+                overlay.removeEventListener('click', closeModal);
+                document.removeEventListener('keydown', onKeyDown);
+            }
+            
+            function onKeyDown(e) {
+                if (e.key === 'Escape') closeModal();
+            }
+            
+            closeBtn.addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+            document.addEventListener('keydown', onKeyDown);
+            return;
+        }
         
         // 创建角色卡片
         profiles.forEach((character) => {
@@ -583,12 +621,51 @@ document.addEventListener('DOMContentLoaded', function() {
             role_name: roleName
         }));
         
-        // 更新按钮
-        selectRoleBtn.innerHTML = `<i class="fas fa-user-check"></i><span>${roleName}</span>`;
+        // 更新按钮（添加取消选择功能）
+        selectRoleBtn.innerHTML = `<i class="fas fa-user-check"></i><span>${roleName}</span> <i class="fas fa-times" style="margin-left: 8px; cursor: pointer; opacity: 0.7;" title="取消选择"></i>`;
         selectRoleBtn.style.background = '#1e293b';
+        
+        // 添加取消选择的事件监听（点击X图标）
+        const cancelIcon = selectRoleBtn.querySelector('.fa-times');
+        if (cancelIcon) {
+            cancelIcon.addEventListener('click', function(e) {
+                e.stopPropagation();
+                clearRoleSelection();
+            });
+        }
         
         // 显示选中的角色在左侧栏顶部
         showSelectedCharacter(characterData);
+        
+        // 触发模式更新事件（模式由服务器根据角色类型自动决定）
+        // 这个事件会被soulverse-panel.js监听并更新模式指示器
+    }
+    
+    // 取消选择角色
+    function clearRoleSelection() {
+        selectedRoleName = null;
+        
+        // 发送取消选择消息
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'clear_role_selection'
+            }));
+        }
+        
+        // 更新按钮
+        selectRoleBtn.innerHTML = `<i class="fas fa-user"></i><span>选择角色</span>`;
+        selectRoleBtn.style.background = '';
+        
+        // 隐藏选中的角色显示
+        const selectedSection = document.getElementById('selectedCharacterSection');
+        if (selectedSection) {
+            selectedSection.style.display = 'none';
+        }
+        
+        // 更新模式指示器
+        if (window.soulversePanel && window.soulversePanel.updateModeIndicator) {
+            window.soulversePanel.updateModeIndicator(null, false);
+        }
     }
     
     // 显示选中的角色
@@ -746,14 +823,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // 添加导出故事按钮的点击事件
+    // 添加导出社交报告按钮的点击事件
     exportStoryBtn.addEventListener('click', function() {
         // 显示加载状态
         exportStoryBtn.disabled = true;
         exportStoryBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>生成中...</span>';
         
+        // 如果当前选择了Agent，导出该Agent的报告；否则导出所有Agent的报告
+        const selectedAgentCode = window.soulversePanel?.currentAgentCode || null;
+        
         ws.send(JSON.stringify({
-            type: 'generate_story'
+            type: 'generate_social_report',
+            agent_code: selectedAgentCode
         }));
     });
     

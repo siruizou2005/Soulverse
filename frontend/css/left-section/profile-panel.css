@@ -31,24 +31,56 @@
 /* 角色卡片 */
 .character-card {
     display: flex;
+    flex-direction: column;
     width: 100%;
     max-width: 100%;
-    background: #ffffff;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
     border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    padding: 14px;
+    border-radius: 12px;
+    padding: 16px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     box-sizing: border-box;
     min-width: 0;
     overflow: hidden;
+    position: relative;
+}
+
+.character-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 .character-card:hover {
     border-color: #cbd5e1;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
-    background: #f8fafc;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+    transform: translateY(-2px);
+}
+
+.character-card:hover::before {
+    opacity: 1;
+}
+
+/* 角色头部 */
+.character-header {
+    margin-bottom: 12px;
+}
+
+.character-name-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 /* 角色头像 */
@@ -81,14 +113,42 @@
 
 .character-name {
     font-weight: 700;
-    font-size: 15px;
+    font-size: 16px;
     color: #1e293b;
-    margin-bottom: 6px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+    margin: 0;
+    flex: 1;
+    min-width: 0;
     word-wrap: break-word;
     overflow-wrap: break-word;
+}
+
+/* MBTI徽章 */
+.mbti-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease;
+}
+
+.character-card:hover .mbti-badge {
+    transform: scale(1.05);
+}
+
+.mbti-label {
+    opacity: 0.9;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.mbti-value {
+    font-size: 12px;
+    font-weight: 800;
 }
 
 .character-description {
@@ -115,39 +175,172 @@
     overflow: visible;
 }
 
+/* 角色分区 */
+.character-section {
+    margin: 12px 0;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    border-left: 3px solid #e2e8f0;
+    transition: all 0.2s ease;
+}
+
+.character-card:hover .character-section {
+    background: rgba(255, 255, 255, 0.9);
+    border-left-color: #6366f1;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.section-header i {
+    color: #6366f1;
+    font-size: 11px;
+}
+
+.section-title {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.section-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+/* 兴趣标签 */
+.interest-tag {
+    display: inline-block;
+    padding: 4px 10px;
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    color: #92400e;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid #fcd34d;
+    transition: all 0.2s ease;
+}
+
+.character-card:hover .interest-tag {
+    background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(146, 64, 14, 0.2);
+}
+
+/* 性格特征标签 */
+.trait-tag {
+    display: inline-block;
+    padding: 4px 10px;
+    background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+    color: #3730a3;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid #a5b4fc;
+    transition: all 0.2s ease;
+}
+
+.character-card:hover .trait-tag {
+    background: linear-gradient(135deg, #c7d2fe 0%, #a5b4fc 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(55, 48, 163, 0.2);
+}
+
+/* 更多标签 */
+.more-tag {
+    display: inline-block;
+    padding: 4px 8px;
+    background: #f1f5f9;
+    color: #64748b;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    font-style: italic;
+}
+
+/* 社交目标 */
+.goal-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: rgba(236, 72, 153, 0.1);
+    border-radius: 6px;
+    font-size: 11px;
+    color: #be185d;
+    margin-bottom: 4px;
+    transition: all 0.2s ease;
+}
+
+.goal-item:last-child {
+    margin-bottom: 0;
+}
+
+.goal-item i {
+    color: #ec4899;
+    font-size: 10px;
+}
+
+.character-card:hover .goal-item {
+    background: rgba(236, 72, 153, 0.15);
+    transform: translateX(2px);
+}
+
+/* 详情项 */
 .character-details {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(102, 126, 234, 0.1);
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 2px solid rgba(226, 232, 240, 0.5);
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
 }
 
-.character-location,
-.character-goal,
-.character-state {
-    font-size: 12px;
-    color: #888;
+.detail-item {
     display: flex;
     align-items: center;
-    gap: 6px;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+    gap: 8px;
+    font-size: 12px;
+    color: #64748b;
+    padding: 6px 8px;
+    background: rgba(241, 245, 249, 0.5);
+    border-radius: 6px;
+    transition: all 0.2s ease;
     word-wrap: break-word;
     overflow-wrap: break-word;
     min-width: 0;
 }
 
-.character-location > *,
-.character-goal > *,
-.character-state > * {
+.detail-item i {
+    color: #94a3b8;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.detail-item span {
+    flex: 1;
     min-width: 0;
-    flex-shrink: 1;
+}
+
+.character-card:hover .detail-item {
+    background: rgba(241, 245, 249, 0.8);
+    color: #475569;
+}
+
+.character-card:hover .detail-item i {
+    color: #6366f1;
 }
 
 .expand-btn {

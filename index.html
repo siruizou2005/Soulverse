@@ -13,7 +13,8 @@
     <link rel="stylesheet" href="./frontend/css/right-section/settings-panel.css">
     <link rel="stylesheet" href="./frontend/css/right-section/status-panel.css">
     <link rel="stylesheet" href="./frontend/css/right-section/scene-panel.css">
-    <link rel="stylesheet" href="./frontend/css/right-section/preset-panel.css">
+    <link rel="stylesheet" href="./frontend/css/soulverse-panel.css">
+    <link rel="stylesheet" href="./frontend/css/soulverse-modal.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -55,8 +56,8 @@
                         <span data-i18n="stop">停止</span>
                     </button>
                     <button id="exportStoryBtn" class="control-btn">
-                        <i class="fas fa-book"></i>
-                        <span data-i18n="exportStory">输出故事</span>
+                        <i class="fas fa-file-alt"></i>
+                        <span data-i18n="exportSocialReport">导出社交报告</span>
                     </button>
                 </div>
                 <div class="right-tools">
@@ -83,12 +84,11 @@
                 <i class="fas fa-chevron-right"></i>
             </button>
             <div class="right-toolbar">
-                <button class="tab-btn active" data-target="status-panel" data-i18n="status">状态</button>
+                <button class="tab-btn" data-target="status-panel" data-i18n="status">状态</button>
                 <button class="tab-btn" data-target="scenes-panel" data-i18n="scenes">场景</button>
-                <button class="tab-btn" data-target="preset-panel" data-i18n="preset">预设</button>
             </div>
             <div class="right-content">
-                <div class="tab-panel active" id="status-panel">
+                <div class="tab-panel" id="status-panel">
                     <div class="status-container">
                         <div class="status-module" id="current-event">
                             <h3 data-i18n="currentEvent">当前事件</h3>
@@ -152,17 +152,60 @@
             <button class="modal-close" aria-label="Close">&times;</button>
             <div class="modal-content">
                 <div class="modal-header">
+                    <div class="modal-header-left">
                     <img class="modal-avatar" src="./frontend/assets/images/default-icon.jpg" alt="Character Avatar">
-                    <div>
+                        <div class="modal-name-section">
                         <h2 class="modal-name">角色名</h2>
-                        <p class="modal-description">简短描述</p>
+                            <div id="modalMBTI" class="modal-mbti-section" style="display: none;"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-body">
-                    <div class="modal-row"><strong>地点：</strong><span class="modal-location"></span></div>
-                    <div class="modal-row"><strong>目标：</strong><span class="modal-goal"></span></div>
-                    <div class="modal-row"><strong>状态：</strong><span class="modal-state"></span></div>
-                    <!-- 注意：动机（motivation）故意不展示以满足隐藏动机的需求 -->
+                    <div class="modal-section">
+                        <div class="modal-section-title">
+                            <i class="fas fa-info-circle"></i>
+                            <span>基本信息</span>
+                        </div>
+                        <p class="modal-description">简短描述</p>
+                        <div class="modal-meta-info">
+                            <span class="modal-meta-item" id="modalLocationItem" style="display: none;">
+                                <i class="fas fa-map-marker-alt"></i>
+                                <span class="modal-location">—</span>
+                            </span>
+                            <span class="modal-meta-item" id="modalStateItem" style="display: none;">
+                                <i class="fas fa-circle"></i>
+                                <span class="modal-state">—</span>
+                            </span>
+                            <span class="modal-meta-item" id="modalGoalItem" style="display: none;">
+                                <i class="fas fa-bullseye"></i>
+                                <span class="modal-goal">—</span>
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-section" id="modalInterests" style="display: none;">
+                        <div class="modal-section-title">
+                            <i class="fas fa-heart"></i>
+                            <span>兴趣标签</span>
+                        </div>
+                        <div class="modal-tags-container" id="modalInterestsTags"></div>
+                    </div>
+                    
+                    <div class="modal-section" id="modalTraits" style="display: none;">
+                        <div class="modal-section-title">
+                            <i class="fas fa-star"></i>
+                            <span>性格特征</span>
+                        </div>
+                        <div class="modal-tags-container" id="modalTraitsTags"></div>
+                    </div>
+                    
+                    <div class="modal-section" id="modalSocialGoals" style="display: none;">
+                        <div class="modal-section-title">
+                            <i class="fas fa-bullseye"></i>
+                            <span>社交目标</span>
+                        </div>
+                        <div class="modal-goals-list" id="modalSocialGoalsList"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -191,8 +234,8 @@
             <button class="modal-close" aria-label="Close">&times;</button>
             <div class="modal-content">
                 <div class="modal-header">
-                    <h2 class="modal-title" data-i18n="exportStory">输出故事</h2>
-                    <button id="downloadStoryBtn" class="download-btn" title="下载故事">
+                    <h2 class="modal-title" data-i18n="exportSocialReport">导出社交报告</h2>
+                    <button id="downloadStoryBtn" class="download-btn" title="下载报告">
                         <i class="fas fa-download"></i>
                         <span data-i18n="download">下载</span>
                     </button>
@@ -229,7 +272,7 @@
     <script src="./frontend/js/right-section/settings-panel.js"></script>
     <script src="./frontend/js/right-section/status-panel.js"></script>
     <script src="./frontend/js/right-section/scene-panel.js"></script>
-    <script src="./frontend/js/right-section/preset-panel.js"></script>
+    <script src="./frontend/js/soulverse-panel.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             if (window.RightSection) {

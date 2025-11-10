@@ -9,9 +9,12 @@ import uuid
 
 from sw_utils import *
 from modules.main_performer import Performer
+from modules.user_agent import UserAgent
+from modules.npc_agent import NPCAgent
 from modules.orchestrator import Orchestrator
 from modules.history_manager import HistoryManager
 from modules.embedding import get_embedding_model
+from modules.time_simulator import TimeSimulator, get_time_simulator
 import argparse
 from datetime import datetime
 
@@ -54,6 +57,11 @@ class Server():
         self.language: str = config["language"] if "language" in config else "zh"
         self.source:str = config["source"] if "source" in config else ""
         
+        # 检测是否为Soulverse模式
+        self.is_soulverse_mode = (self.source == "soulverse" or 
+                                  "soulverse" in self.source.lower() or
+                                  len(config.get('performer_codes', [])) == 0)  # 空角色列表表示Soulverse模式
+        
         self.idx: int = 0
         self.cur_round: int = 0
         self.progress: str = "剧本刚刚开始，还什么都没有发生" if self.language == 'zh' else "The story has just begun, nothing happens yet."
@@ -66,6 +74,9 @@ class Server():
         }
         self.scene_characters = {}
         self.event_history = []
+        
+        # 初始化时间模拟器（1虚拟小时 = 1实际分钟，即60倍速）
+        self.time_simulator = get_time_simulator(time_ratio=60.0)
         
         self.role_llm = get_models(role_llm_name)
         self.logger = get_logger(self.experiment_name)
@@ -157,6 +168,142 @@ class Server():
         self.orchestrator.llm = self.world_llm
         self.role_llm_name = role_llm_name
         self.world_llm_name = world_llm_name
+    
+    def add_user_agent(self,
+                      user_id: str,
+                      role_code: str,
+                      soul_profile: Optional[Dict[str, Any]] = None,
+                      initial_location: Optional[str] = None):
+        """
+        动态添加用户Agent到沙盒
+        
+        Args:
+            user_id: 用户ID
+            role_code: Agent的角色代码（唯一标识）
+            soul_profile: Soul用户画像数据（如果为None，则从模拟API获取）
+            initial_location: 初始位置代码（如果为None，随机分配）
+        
+        Returns:
+            创建的UserAgent实例
+        """
+        # 检查role_code是否已存在
+        if role_code in self.role_codes:
+            raise ValueError(f"Agent with role_code {role_code} already exists")
+        
+        # 创建UserAgent
+        user_agent = UserAgent(
+            user_id=user_id,
+            role_code=role_code,
+            world_file_path=self.config.get("world_file_path", ""),
+            soul_profile=soul_profile,
+            language=self.language,
+            db_type="chroma",
+            llm_name=self.role_llm_name,
+            llm=self.role_llm,
+            embedding_name=self.embedding_name,
+            embedding=self.embedding
+        )
+        
+        # 设置初始位置
+        if initial_location:
+            if initial_location in self.orchestrator.locations:
+                user_agent.set_location(initial_location, self.orchestrator.find_location_name(initial_location))
+            else:
+                # 如果位置无效，随机分配
+                initial_location = random.choice(self.orchestrator.locations)
+                user_agent.set_location(initial_location, self.orchestrator.find_location_name(initial_location))
+        else:
+            # 随机分配位置
+            initial_location = random.choice(self.orchestrator.locations)
+            user_agent.set_location(initial_location, self.orchestrator.find_location_name(initial_location))
+        
+        # 共享world_db
+        user_agent.world_db = self.orchestrator.db
+        user_agent.world_db_name = self.orchestrator.db_name
+        
+        # 添加到系统
+        self.role_codes.append(role_code)
+        self.performers[role_code] = user_agent
+        
+        # 设置初始motivation
+        motivation = user_agent.set_motivation(
+            world_description=self.orchestrator.description,
+            other_roles_info=self._get_group_members_info_dict(self.performers),
+            intervention=self.event,
+            script=self.script
+        )
+        
+        self.log(f"用户Agent {user_agent.nickname} ({role_code}) 已加入沙盒，初始位置: {user_agent.location_name}")
+        
+        return user_agent
+    
+    def add_npc_agent(self,
+                     role_code: str,
+                     role_name: str,
+                     preset_config: Dict[str, Any],
+                     initial_location: Optional[str] = None):
+        """
+        动态添加NPC Agent到沙盒
+        
+        Args:
+            role_code: Agent的角色代码（唯一标识）
+            role_name: Agent的名称
+            preset_config: 预设配置字典，包含兴趣、MBTI、性格、社交目标等
+            initial_location: 初始位置代码（如果为None，随机分配）
+        
+        Returns:
+            创建的NPCAgent实例
+        """
+        # 检查role_code是否已存在
+        if role_code in self.role_codes:
+            raise ValueError(f"Agent with role_code {role_code} already exists")
+        
+        # 创建NPCAgent
+        npc_agent = NPCAgent(
+            role_code=role_code,
+            role_name=role_name,
+            world_file_path=self.config.get("world_file_path", ""),
+            preset_config=preset_config,
+            language=self.language,
+            db_type="chroma",
+            llm_name=self.role_llm_name,
+            llm=self.role_llm,
+            embedding_name=self.embedding_name,
+            embedding=self.embedding
+        )
+        
+        # 设置初始位置
+        if initial_location:
+            if initial_location in self.orchestrator.locations:
+                npc_agent.set_location(initial_location, self.orchestrator.find_location_name(initial_location))
+            else:
+                # 如果位置无效，随机分配
+                initial_location = random.choice(self.orchestrator.locations)
+                npc_agent.set_location(initial_location, self.orchestrator.find_location_name(initial_location))
+        else:
+            # 随机分配位置
+            initial_location = random.choice(self.orchestrator.locations)
+            npc_agent.set_location(initial_location, self.orchestrator.find_location_name(initial_location))
+        
+        # 共享world_db
+        npc_agent.world_db = self.orchestrator.db
+        npc_agent.world_db_name = self.orchestrator.db_name
+        
+        # 添加到系统
+        self.role_codes.append(role_code)
+        self.performers[role_code] = npc_agent
+        
+        # 设置初始motivation
+        motivation = npc_agent.set_motivation(
+            world_description=self.orchestrator.description,
+            other_roles_info=self._get_group_members_info_dict(self.performers),
+            intervention=self.event,
+            script=self.script
+        )
+        
+        self.log(f"NPC Agent {npc_agent.nickname} ({role_code}) 已加入沙盒，初始位置: {npc_agent.location_name}")
+        
+        return npc_agent
         
     # Simulation        
     def simulate_generator(self, 
@@ -663,7 +810,17 @@ class Server():
         return self.script
     
     def update_event(self, group: List[str], top_k: int = 1):
-        if self.intervention == "":
+        # Soulverse模式：生成新的社交场景事件
+        if self.is_soulverse_mode:
+            from modules.soulverse_mode import SoulverseMode
+            soulverse_mode = SoulverseMode(language=self.language)
+            agents_info = [self.performers[code] for code in self.role_codes]
+            recent_activities = self.history_manager.get_recent_history(5)
+            self.event = soulverse_mode.generate_social_event(
+                agents_info=agents_info,
+                recent_activities=recent_activities
+            )
+        elif self.intervention == "":
             self.event = ""
         else:
             status_text = self._get_status_text(group)
@@ -702,6 +859,9 @@ class Server():
             other_info = ""
         else:
             other_info = ""
+        # 获取虚拟时间戳
+        virtual_time = self.time_simulator.get_virtual_time() if hasattr(self, 'time_simulator') else datetime.now()
+        
         record = {
             "cur_round":self.cur_round,
             "role_code":role_code,
@@ -711,7 +871,9 @@ class Server():
             "actor_type":actor_type,
             "act_type":act_type,
             "other_info":other_info,
-            "record_id":record_id
+            "record_id":record_id,
+            "virtual_time": virtual_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "virtual_timestamp": virtual_time.timestamp()
         }
         self.history_manager.add_record(record)
         for code in group:
@@ -969,8 +1131,33 @@ class ScrollWeaver():
                 "description": agent.role_profile,
                 "goal": agent.goal if agent.goal else agent.motivation,
                 "state": agent.status,
-                "location": location
+                "location": location,
+                "code": code  # 添加role_code用于识别
             }
+            
+            # 标记是否为用户Agent
+            if hasattr(agent, 'is_user_agent') and agent.is_user_agent:
+                chara_info["is_user_agent"] = True
+            elif hasattr(agent, 'is_npc_agent') and agent.is_npc_agent:
+                chara_info["is_npc_agent"] = True
+                chara_info["is_user_agent"] = False
+            else:
+                # 默认不是用户Agent（兼容旧代码）
+                chara_info["is_user_agent"] = False
+            
+            # 如果是UserAgent或NPCAgent，添加额外信息
+            if hasattr(agent, 'soul_profile') and agent.soul_profile:
+                chara_info["mbti"] = agent.soul_profile.get("mbti", "")
+                chara_info["interests"] = agent.soul_profile.get("interests", [])
+                chara_info["personality"] = agent.soul_profile.get("personality", "")
+                chara_info["traits"] = agent.soul_profile.get("traits", [])
+                chara_info["social_goals"] = agent.soul_profile.get("social_goals", [])
+            elif hasattr(agent, 'preset_config') and agent.preset_config:
+                chara_info["mbti"] = agent.preset_config.get("mbti", "")
+                chara_info["interests"] = agent.preset_config.get("interests", [])
+                chara_info["personality"] = agent.preset_config.get("personality", "")
+                chara_info["traits"] = agent.preset_config.get("tags", [])
+                chara_info["social_goals"] = agent.preset_config.get("social_goals", [])
             characters_info.append(chara_info)
         return characters_info
 
@@ -1044,10 +1231,114 @@ class ScrollWeaver():
             })
         return messages
     
-    def generate_story(self):
-        logs = self.server.history_manager.get_complete_history()
-        story = self.server.orchestrator.log2story(logs)
-        return story
+    def generate_social_report(self, agent_code: Optional[str] = None):
+        """
+        生成社交报告（替代原来的generate_story）
+        如果是Soulverse模式，生成结构化的社交报告；否则保持原有逻辑
+        
+        Args:
+            agent_code: 可选，指定Agent代码。如果为None，生成所有Agent的报告
+        
+        Returns:
+            社交报告文本或结构化数据
+        """
+        if self.server.is_soulverse_mode:
+            # Soulverse模式：生成结构化的社交报告
+            from modules.social_story_generator import SocialStoryGenerator
+            from datetime import datetime, timedelta
+            
+            generator = SocialStoryGenerator(self.server.history_manager, language=self.server.language)
+            
+            if agent_code:
+                # 生成单个Agent的报告
+                story_info = generator.get_agent_story(agent_code, max_events=100)
+                report = self._format_agent_social_report(agent_code, story_info)
+            else:
+                # 生成所有Agent的综合报告
+                report = self._format_all_agents_social_report(generator)
+            
+            return report
+        else:
+            # 非Soulverse模式：保持原有的故事生成逻辑
+            logs = self.server.history_manager.get_complete_history()
+            story = self.server.orchestrator.log2story(logs)
+            return story
+    
+    def _format_agent_social_report(self, agent_code, story_info):
+        """格式化单个Agent的社交报告"""
+        agent = self.server.performers.get(agent_code)
+        agent_name = agent.nickname if agent else agent_code
+        
+        stats = story_info.get("stats", {})
+        key_events = story_info.get("key_events", [])
+        story_text = story_info.get("story_text", "")
+        
+        report_lines = [
+            f"# {agent_name} 的社交报告",
+            f"",
+            f"## 统计信息",
+            f"- 总互动次数: {stats.get('total_interactions', 0)}",
+            f"- 接触的Agent数量: {stats.get('unique_contacts_count', 0)}",
+            f"- 移动次数: {stats.get('total_movements', 0)}",
+            f"- 时间范围: {stats.get('time_range', '未知')}",
+            f"",
+        ]
+        
+        if key_events:
+            report_lines.extend([
+                f"## 关键事件时间线",
+                f""
+            ])
+            for event in key_events:
+                event_type = "💬 互动" if event.get("type") == "interaction" else \
+                            "🚶 移动" if event.get("type") == "movement" else \
+                            "🎯 目标" if event.get("type") == "goal" else "📝 事件"
+                time_str = event.get("time", "")
+                detail = event.get("detail", "")
+                report_lines.append(f"### {time_str} - {event_type}")
+                report_lines.append(f"{detail}")
+                report_lines.append("")
+        
+        if story_text:
+            report_lines.extend([
+                f"## 详细活动记录",
+                f"",
+                story_text
+            ])
+        
+        return "\n".join(report_lines)
+    
+    def _format_all_agents_social_report(self, generator):
+        """格式化所有Agent的综合社交报告"""
+        report_lines = [
+            "# Soulverse 社交报告",
+            "",
+            f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "## 概述",
+            f"本报告记录了Soulverse虚拟社交沙盒中所有Agent的社交活动。",
+            "",
+        ]
+        
+        # 获取所有用户Agent
+        user_agents = [code for code, agent in self.server.performers.items() 
+                      if hasattr(agent, 'is_user_agent') and agent.is_user_agent]
+        
+        if not user_agents:
+            report_lines.append("目前还没有用户Agent参与社交活动。")
+            return "\n".join(report_lines)
+        
+        # 为每个Agent生成报告
+        for agent_code in user_agents:
+            agent = self.server.performers[agent_code]
+            story_info = generator.get_agent_story(agent_code, max_events=50)
+            agent_report = self._format_agent_social_report(agent_code, story_info)
+            report_lines.append("---")
+            report_lines.append("")
+            report_lines.append(agent_report)
+            report_lines.append("")
+        
+        return "\n".join(report_lines)
     
 def _is_connection_issue(exc: Exception) -> bool:
     connection_error_names = {

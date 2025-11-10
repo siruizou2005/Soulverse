@@ -55,8 +55,11 @@ class Orchestrator:
                 csv_reader = csv.reader(file)
                 locations = next(csv_reader)[1:]  
                 for row in csv_reader:
+                    # 跳过空行
+                    if not row or len(row) == 0:
+                        continue
                     loc1 = row[0]
-                    if loc1 not in valid_locations:
+                    if not loc1 or loc1 not in valid_locations:
                         print(f"Warning: The location {loc1} does not exist")
                         continue
                     self.locations_info[loc1] = valid_locations[loc1]
