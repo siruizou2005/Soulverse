@@ -321,7 +321,18 @@ class Performer:
                              action_maker_profile: str, 
                              intervention: str = ""):
         references = self.retrieve_references(action_detail)
-        history = self.retrieve_history(query = action_detail)
+        # 当上一条为用户输入时，优先用用户输入做query并启用语义检索，扩大top_k
+        use_user_query = False
+        user_query_text = ""
+        if hasattr(self, 'history_manager') and len(self.history_manager) > 0:
+            last = self.history_manager.detailed_history[-1]
+            if last.get('act_type') in ('user_input', 'user_input_placeholder'):
+                use_user_query = True
+                user_query_text = last.get('detail', '')
+        if use_user_query and user_query_text.strip():
+            history = self.retrieve_history(query = user_query_text, top_k = 6, retrieve = True)
+        else:
+            history = self.retrieve_history(query = action_detail)
         knowledges = self.retrieve_knowledges(query = action_detail)
         
         relation = f"role_code:{action_maker_code}\n" + self.search_relation(action_maker_code)
@@ -377,7 +388,18 @@ class Performer:
                             other_roles_info: Dict[str, Any], 
                             intervention: str = ""):
         references = self.retrieve_references(query = action_detail)
-        history = self.retrieve_history(query = action_detail)
+        # 当上一条为用户输入时，优先用用户输入做query并启用语义检索，扩大top_k
+        use_user_query = False
+        user_query_text = ""
+        if hasattr(self, 'history_manager') and len(self.history_manager) > 0:
+            last = self.history_manager.detailed_history[-1]
+            if last.get('act_type') in ('user_input', 'user_input_placeholder'):
+                use_user_query = True
+                user_query_text = last.get('detail', '')
+        if use_user_query and user_query_text.strip():
+            history = self.retrieve_history(query = user_query_text, top_k = 6, retrieve = True)
+        else:
+            history = self.retrieve_history(query = action_detail)
         knowledges = self.retrieve_knowledges(query = action_detail)
         
         other_roles_info_text = self.get_other_roles_info_text(other_roles_info, if_profile = False)

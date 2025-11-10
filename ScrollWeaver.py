@@ -380,7 +380,12 @@ class Server():
                 yield ("system","",f"--------- Setted Script ---------\n{self.script}\n", None) 
                 self.event_history.append(self.event)
             if self.mode == "free":
+                # 获取用户角色代码（如果存在）
+                user_role_code = getattr(self, '_user_role_code', None)
+                
                 for role_code in self.role_codes:
+                    # 在Goal Setting阶段，用户角色也会设置motivation，但不yield消息
+                    # 因为Goal Setting是自动的，不需要用户输入
                     motivation = self.performers[role_code].set_motivation(
                         world_description = self.orchestrator.description, 
                         other_roles_info = self._get_group_members_info_dict(self.performers),
@@ -399,7 +404,15 @@ class Server():
                                 actor_type = 'role',
                                 act_type="goal setting",
                                 record_id = record_id)
-                    yield ("role",role_code,info_text,record_id)
+                    
+                    # 如果是用户角色，不yield消息（Goal Setting阶段不需要用户输入）
+                    # 但如果是其他角色，正常yield消息
+                    if user_role_code and role_code == user_role_code:
+                        # 用户角色：只记录，不yield，避免在Goal Setting阶段要求用户输入
+                        continue
+                    else:
+                        # 其他角色：正常yield消息
+                        yield ("role",role_code,info_text,record_id)
                     
             self._save_current_simulation("goal")
             
@@ -450,9 +463,42 @@ class Server():
                         self.performers[role_code].update_goal(other_roles_status=self._get_status_text(self.role_codes))
 
                 for role_code in group:
+                    # 正常决定下一个行动的角色（由系统根据场景逻辑自然决定）
                     if scene_mode:
-                        role_code =  self._name2code(self.orchestrator.decide_next_actor("\n".join(self.history_manager.get_recent_history(3)),self._get_group_members_info_text(group,status=True),self.script)) if scene_mode else role_code
+                        # 若最近一条为用户输入，则放大历史窗口并加入用户焦点导语
+                        recent_k = 3
+                        last_is_user = False
+                        last_user_text = ""
+                        if hasattr(self.history_manager, 'detailed_history') and len(self.history_manager.detailed_history) > 0:
+                            last = self.history_manager.detailed_history[-1]
+                            last_is_user = last.get('act_type') in ('user_input', 'user_input_placeholder')
+                            if last_is_user:
+                                recent_k = 8
+                                last_user_text = last.get('detail', '')
+                        history_text = "\n".join(self.history_manager.get_recent_history(recent_k))
+                        if last_is_user and last_user_text.strip():
+                            focus_prefix = f"【重点】用户刚刚说：{last_user_text}\n请优先回应该内容。\n"
+                            history_text = focus_prefix + history_text
+                        role_code =  self._name2code(self.orchestrator.decide_next_actor(history_text,self._get_group_members_info_text(group,status=True),self.script))
                     
+                    # 检查是否是用户选择的角色（如果是，等待用户输入而不是生成计划）
+                    user_role_code = getattr(self, '_user_role_code', None)
+                    if user_role_code and role_code == user_role_code:
+                        # 系统选择了用户控制的角色，不调用plan()生成计划，而是创建占位消息等待用户输入
+                        record_id = str(uuid.uuid4())
+                        placeholder_text = "__USER_INPUT_PLACEHOLDER__"
+                        self.record(role_code=role_code,
+                                    detail=placeholder_text,
+                                    actor_type='role',
+                                    act_type="user_input_placeholder",
+                                    actor=role_code,
+                                    group=[role_code],
+                                    record_id=record_id)
+                        yield ("role", role_code, placeholder_text, record_id)
+                        # 跳过plan和interaction，等待用户输入
+                        continue
+                    
+                    # 正常执行计划（非用户角色）
                     yield from self.implement_next_plan(role_code = role_code,
                                             group = group)
                     self._save_current_simulation("action", current_round, sub_round)
@@ -675,6 +721,27 @@ class Server():
         
         start_idx = len(self.history_manager)
         for round in range(max_rounds):
+            # 如果当前轮到的角色是用户控制的Agent，则跳过自动回复，等待用户输入
+            user_role_code = getattr(self, '_user_role_code', None)
+            if user_role_code and acting_role_code == user_role_code:
+                placeholder_id = str(uuid.uuid4())
+                placeholder_text = "__USER_INPUT_PLACEHOLDER__"
+                self.log(f"{self.performers[acting_role_code].role_name}: (等待用户输入)")
+                self.record(
+                    role_code=acting_role_code,
+                    detail=placeholder_text,
+                    actor_type='role',
+                    act_type="user_input_placeholder",
+                    actor=acting_role_code,
+                    group=[acted_role_code, acting_role_code],
+                    target_role_code=acting_role_code,
+                    planning_role_code=plan["role_code"],
+                    round=round,
+                    record_id=placeholder_id
+                )
+                yield ("role", acting_role_code, placeholder_text, placeholder_id)
+                return
+
             interaction = self.performers[acting_role_code].single_role_interact(
                 action_maker_code = acted_role_code, 
                 action_maker_name = self.performers[acted_role_code].role_name,
@@ -740,10 +807,30 @@ class Server():
         other_roles_info = self._get_group_members_info_dict(group)
         
         for round in range(max_rounds):
-            acting_role_code = self._name2code(self.orchestrator.decide_next_actor(history_text = "\n".join(self.history_manager.get_recent_history(3)),
-                                                                  roles_info_text = self._get_group_members_info_text(remove_list_elements(group,acted_role_code),status=True)))
+            acting_role_code = self._name2code(self.orchestrator.decide_next_actor(
+                history_text="\n".join(self.history_manager.get_recent_history(3)),
+                roles_info_text=self._get_group_members_info_text(remove_list_elements(group, acted_role_code), status=True)))
 
-            
+            # 如果轮到用户控制的角色，跳过自动生成对话，等待用户输入
+            user_role_code = getattr(self, '_user_role_code', None)
+            if user_role_code and acting_role_code == user_role_code:
+                placeholder_id = str(uuid.uuid4())
+                placeholder_text = "__USER_INPUT_PLACEHOLDER__"
+                self.log(f"{self.performers[acting_role_code].role_name}: (等待用户输入)")
+                self.record(
+                    role_code=acting_role_code,
+                    detail=placeholder_text,
+                    actor_type='role',
+                    act_type="user_input_placeholder",
+                    actor=acting_role_code,
+                    group=group,
+                    planning_role_code=plan["role_code"],
+                    round=round,
+                    record_id=placeholder_id
+                )
+                yield ("role", acting_role_code, placeholder_text, placeholder_id)
+                return
+
             interaction = self.performers[acting_role_code].multi_role_interact(
                 action_maker_code = acted_role_code, 
                 action_maker_name = self.performers[acted_role_code].role_name,
@@ -1285,13 +1372,14 @@ class ScrollWeaver():
             })
         return messages
     
-    def generate_social_report(self, agent_code: Optional[str] = None):
+    def generate_social_report(self, agent_code: Optional[str] = None, format: str = "text"):
         """
         生成社交报告（替代原来的generate_story）
         如果是Soulverse模式，生成结构化的社交报告；否则保持原有逻辑
         
         Args:
             agent_code: 可选，指定Agent代码。如果为None，生成所有Agent的报告
+            format: 返回格式，"text" 返回文本，"json" 返回结构化数据（包含图表数据）
         
         Returns:
             社交报告文本或结构化数据
@@ -1299,27 +1387,62 @@ class ScrollWeaver():
         if self.server.is_soulverse_mode:
             # Soulverse模式：生成结构化的社交报告
             from modules.social_story_generator import SocialStoryGenerator
+            from modules.social_analyzer import SocialAnalyzer
             from datetime import datetime, timedelta
             
             generator = SocialStoryGenerator(self.server.history_manager, language=self.server.language)
+            analyzer = SocialAnalyzer(
+                self.server.history_manager, 
+                language=self.server.language,
+                llm_name=self.server.world_llm_name
+            )
             
             if agent_code:
                 # 生成单个Agent的报告
                 story_info = generator.get_agent_story(agent_code, max_events=100)
-                report = self._format_agent_social_report(agent_code, story_info)
+                
+                # 获取Agent的profile信息
+                agent = self.server.performers.get(agent_code)
+                agent_profile = {}
+                if agent:
+                    if hasattr(agent, 'soul_profile') and agent.soul_profile:
+                        agent_profile = agent.soul_profile
+                    elif hasattr(agent, 'preset_config') and agent.preset_config:
+                        agent_profile = {
+                            "interests": agent.preset_config.get("interests", []),
+                            "mbti": agent.preset_config.get("mbti", ""),
+                            "personality": agent.preset_config.get("personality", ""),
+                            "social_goals": agent.preset_config.get("social_goals", [])
+                        }
+                
+                # 分析Agent行为
+                behavior_analysis = analyzer.analyze_agent_behavior(agent_code, agent_profile)
+                
+                # 计算与其他Agent的投缘度
+                compatibilities = self._calculate_all_compatibilities(agent_code, agent_profile, analyzer, story_info)
+                
+                if format == "json":
+                    # 返回结构化数据（用于前端图表展示）
+                    return self._format_agent_social_report_json(agent_code, story_info, behavior_analysis, compatibilities)
+                else:
+                    # 返回文本格式
+                    report = self._format_agent_social_report(agent_code, story_info, behavior_analysis, compatibilities)
+                    return report
             else:
                 # 生成所有Agent的综合报告
-                report = self._format_all_agents_social_report(generator)
-            
-            return report
+                if format == "json":
+                    return self._format_all_agents_social_report_json(generator, analyzer)
+                else:
+                    report = self._format_all_agents_social_report(generator)
+                    return report
         else:
             # 非Soulverse模式：保持原有的故事生成逻辑
             logs = self.server.history_manager.get_complete_history()
             story = self.server.orchestrator.log2story(logs)
             return story
     
-    def _format_agent_social_report(self, agent_code, story_info):
-        """格式化单个Agent的社交报告"""
+    def _format_agent_social_report(self, agent_code, story_info, behavior_analysis=None, compatibilities=None):
+        """格式化单个Agent的社交报告（文本格式）"""
         agent = self.server.performers.get(agent_code)
         agent_name = agent.nickname if agent else agent_code
 
@@ -1333,9 +1456,6 @@ class ScrollWeaver():
             end = time_range.get("end", "?")
             time_range_str = f"{start} ~ {end}"
 
-        partner_stats = self._build_partner_summaries(agent_code, key_events)
-        match_analysis = self._generate_match_analysis(agent_name, partner_stats)
-
         report_lines = [
             f"# {agent_name} 的社交报告",
             "",
@@ -1347,9 +1467,49 @@ class ScrollWeaver():
             "",
         ]
 
+        # 添加行为分析
+        if behavior_analysis:
+            insights = behavior_analysis.get("behavior_insights", {})
+            if insights:
+                report_lines.extend([
+                    "## AI行为特点分析",
+                    "",
+                    insights.get("analysis", "暂无分析数据"),
+                    "",
+                    f"- 社交活跃度: {insights.get('social_activity_level', '未知')}",
+                    f"- 互动风格: {insights.get('interaction_style', '未知')}",
+                    f"- 位置偏好: {insights.get('location_preference', '未知')}",
+                    "",
+                ])
+        
+        # 添加投缘度分析
+        if compatibilities:
+            report_lines.extend([
+                "## 与其他Agent的投缘度",
+                "",
+            ])
+            # 按投缘度排序
+            sorted_compat = sorted(compatibilities, key=lambda x: x.get("overall_compatibility", 0), reverse=True)
+            for comp in sorted_compat[:5]:  # 只显示前5个
+                agent2_name = comp.get("agent2_name", comp.get("agent2_code", "未知"))
+                overall = comp.get("overall_compatibility", 0)
+                scores = comp.get("scores", {})
+                desc = comp.get("description", "")
+                report_lines.append(f"### {agent2_name}")
+                report_lines.append(f"综合投缘度: {overall:.0%}")
+                report_lines.append(f"- 兴趣相似度: {scores.get('interests', 0):.0%}")
+                report_lines.append(f"- MBTI兼容度: {scores.get('mbti', 0):.0%}")
+                report_lines.append(f"- 互动频率: {scores.get('interaction', 0):.0%}")
+                report_lines.append(f"- 目标匹配度: {scores.get('goals', 0):.0%}")
+                report_lines.append(f"{desc}")
+                report_lines.append("")
+        
+        # 原有的匹配度分析（保留兼容性）
+        partner_stats = self._build_partner_summaries(agent_code, key_events)
+        match_analysis = self._generate_match_analysis(agent_name, partner_stats)
         if match_analysis:
             report_lines.extend([
-                "## AI匹配度分析",
+                "## 互动统计",
                 "",
                 match_analysis,
                 "",
@@ -1360,7 +1520,7 @@ class ScrollWeaver():
                 f"## 关键事件时间线",
                 f""
             ])
-            for event in key_events:
+            for event in key_events[:20]:  # 只显示最近20个事件
                 event_type = "💬 互动" if event.get("type") == "interaction" else \
                             "🚶 移动" if event.get("type") == "movement" else \
                             "🎯 目标" if event.get("type") == "goal" else "📝 事件"
@@ -1378,6 +1538,159 @@ class ScrollWeaver():
             ])
         
         return "\n".join(report_lines)
+    
+    def _format_agent_social_report_json(self, agent_code, story_info, behavior_analysis, compatibilities):
+        """格式化单个Agent的社交报告（JSON格式，包含图表数据）"""
+        agent = self.server.performers.get(agent_code)
+        agent_name = agent.nickname if agent else agent_code
+
+        stats = story_info.get("stats", {})
+        key_events = story_info.get("key_events", [])
+        time_range = story_info.get("time_range") or {}
+        
+        # 构建图表数据
+        chart_data = self._build_chart_data(agent_code, story_info, behavior_analysis, compatibilities)
+        
+        return {
+            "agent_code": agent_code,
+            "agent_name": agent_name,
+            "stats": stats,
+            "behavior_analysis": behavior_analysis,
+            "compatibilities": compatibilities,
+            "key_events": key_events[:50],  # 限制事件数量
+            "time_range": time_range,
+            "chart_data": chart_data,
+            "report_text": self._format_agent_social_report(agent_code, story_info, behavior_analysis, compatibilities)
+        }
+    
+    def _build_chart_data(self, agent_code, story_info, behavior_analysis, compatibilities):
+        """构建图表数据"""
+        chart_data = {}
+        
+        # 1. 互动统计图表数据
+        stats = story_info.get("stats", {})
+        chart_data["interaction_stats"] = {
+            "labels": ["总互动", "发起互动", "接收互动", "移动次数"],
+            "values": [
+                stats.get("total_interactions", 0),
+                behavior_analysis.get("stats", {}).get("initiated_interactions", 0),
+                behavior_analysis.get("stats", {}).get("received_interactions", 0),
+                stats.get("total_movements", 0)
+            ]
+        }
+        
+        # 2. 时间段活跃度图表
+        time_activity = behavior_analysis.get("time_activity", {})
+        chart_data["time_activity"] = {
+            "labels": ["早上 (6-12)", "下午 (12-18)", "晚上 (18-24)", "深夜 (0-6)"],
+            "values": [
+                time_activity.get("morning", 0),
+                time_activity.get("afternoon", 0),
+                time_activity.get("evening", 0),
+                time_activity.get("night", 0)
+            ]
+        }
+        
+        # 3. 位置偏好图表
+        location_preferences = behavior_analysis.get("location_preferences", {})
+        if location_preferences:
+            sorted_locations = sorted(location_preferences.items(), key=lambda x: x[1], reverse=True)[:5]
+            chart_data["location_preferences"] = {
+                "labels": [loc[0] for loc in sorted_locations],
+                "values": [loc[1] for loc in sorted_locations]
+            }
+        
+        # 4. 投缘度排行榜
+        if compatibilities:
+            sorted_comp = sorted(compatibilities, key=lambda x: x.get("overall_compatibility", 0), reverse=True)[:10]
+            chart_data["compatibility_ranking"] = {
+                "labels": [comp.get("agent2_name", comp.get("agent2_code", "")) for comp in sorted_comp],
+                "values": [comp.get("overall_compatibility", 0) * 100 for comp in sorted_comp],
+                "details": sorted_comp
+            }
+        
+        # 5. 互动模式分布
+        interaction_patterns = behavior_analysis.get("interaction_patterns", {})
+        chart_data["interaction_patterns"] = {
+            "labels": ["群体互动", "一对一互动"],
+            "values": [
+                interaction_patterns.get("prefers_group", 0) * 100,
+                interaction_patterns.get("prefers_one_on_one", 0) * 100
+            ]
+        }
+        
+        return chart_data
+    
+    def _calculate_all_compatibilities(self, agent_code, agent_profile, analyzer, story_info):
+        """计算与所有其他Agent的投缘度"""
+        compatibilities = []
+        
+        # 获取所有其他Agent
+        other_agents = []
+        for code, agent in self.server.performers.items():
+            if code != agent_code:
+                other_agents.append((code, agent))
+        
+        # 获取互动历史
+        key_events = story_info.get("key_events", [])
+        interaction_history = [e for e in key_events if e.get("type") == "interaction"]
+        
+        # 计算与每个Agent的投缘度
+        for other_code, other_agent in other_agents:
+            # 获取其他Agent的profile
+            other_profile = {}
+            if hasattr(other_agent, 'soul_profile') and other_agent.soul_profile:
+                other_profile = other_agent.soul_profile
+            elif hasattr(other_agent, 'preset_config') and other_agent.preset_config:
+                other_profile = {
+                    "interests": other_agent.preset_config.get("interests", []),
+                    "mbti": other_agent.preset_config.get("mbti", ""),
+                    "personality": other_agent.preset_config.get("personality", ""),
+                    "social_goals": other_agent.preset_config.get("social_goals", [])
+                }
+            
+            # 筛选与该Agent的互动记录
+            relevant_interactions = [
+                e for e in interaction_history 
+                if other_code in e.get("participants", [])
+            ]
+            
+            # 计算投缘度
+            compatibility = analyzer.calculate_compatibility(
+                agent_code, agent_profile,
+                other_code, other_profile,
+                relevant_interactions
+            )
+            
+            compatibility["agent2_name"] = other_agent.nickname if other_agent else other_code
+            compatibilities.append(compatibility)
+        
+        return compatibilities
+    
+    def _format_all_agents_social_report_json(self, generator, analyzer):
+        """格式化所有Agent的社交报告（JSON格式）"""
+        user_agents = [code for code, agent in self.server.performers.items() 
+                      if hasattr(agent, 'is_user_agent') and agent.is_user_agent]
+        
+        reports = []
+        for agent_code in user_agents:
+            story_info = generator.get_agent_story(agent_code, max_events=50)
+            agent = self.server.performers.get(agent_code)
+            agent_profile = {}
+            if agent and hasattr(agent, 'soul_profile') and agent.soul_profile:
+                agent_profile = agent.soul_profile
+            
+            behavior_analysis = analyzer.analyze_agent_behavior(agent_code, agent_profile)
+            compatibilities = self._calculate_all_compatibilities(agent_code, agent_profile, analyzer, story_info)
+            
+            report_json = self._format_agent_social_report_json(agent_code, story_info, behavior_analysis, compatibilities)
+            reports.append(report_json)
+        
+        return {
+            "reports": reports,
+            "total_agents": len(reports),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
     def _build_partner_summaries(self, agent_code, key_events):
         partner_stats = {}

@@ -89,6 +89,8 @@ document.addEventListener('DOMContentLoaded', function() {
             textarea.placeholder = `请输入 ${message.data.role_name} 的内容...`;
             textarea.disabled = false;
             textarea.focus();
+            // 更新发送按钮状态
+            updateSendButtonState();
             // 显示AI自动完成按钮
             if (autoCompleteBtn) {
                 autoCompleteBtn.style.display = 'flex';
@@ -99,7 +101,13 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (message.type === 'role_selected') {
             // 角色选择成功
             selectedRoleName = message.data.role_name;
+            window.selectedRoleName = message.data.role_name;
             addSystemMessage(message.data.message);
+            
+            // 触发角色列表重新渲染，使选中的角色置顶
+            if (window.characterProfiles && window.characterProfiles.characters) {
+                window.characterProfiles.renderCharacters(window.characterProfiles.characters);
+            }
             
             // 查找并显示选中的角色
             if (window.characterProfiles) {
@@ -156,12 +164,29 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (message.type === 'story_exported' || message.type === 'social_report_exported') {
             // 社交报告导出成功
             const reportText = message.data.report || message.data.story;
-            showStoryModal(reportText, message.data.timestamp);
+            const reportData = message.data.report_data; // 结构化数据（如果存在）
+            const format = message.data.format || 'text'; // 报告格式
             
             // 恢复按钮状态
             if (exportStoryBtn) {
                 exportStoryBtn.disabled = false;
                 exportStoryBtn.innerHTML = '<i class="fas fa-file-alt"></i><span data-i18n="exportSocialReport">导出社交报告</span>';
+            }
+            
+            if (format === 'json' && reportData && typeof window.showStoryModalWithCharts === 'function') {
+                // 显示带图表的报告
+                window.showStoryModalWithCharts(reportText, reportData, message.data.timestamp);
+            } else if (format === 'json' && reportData) {
+                // 如果函数在全局作用域，尝试直接调用
+                if (typeof showStoryModalWithCharts === 'function') {
+                    showStoryModalWithCharts(reportText, reportData, message.data.timestamp);
+                } else {
+                    // 降级到文本报告
+                    showStoryModal(reportText, message.data.timestamp);
+                }
+            } else {
+                // 显示文本报告
+                showStoryModal(reportText, message.data.timestamp);
             }
         }
         else if (message.type === 'auto_complete_options') {
@@ -233,6 +258,43 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 渲染消息
     function renderMessage(message) {
+        // 如果上一个消息是本地临时用户消息，则用服务器回显的用户消息替换之，避免重复
+        if (message && message.is_user) {
+            // 从后往前查找临时用户消息，匹配用户名和文本内容
+            const children = Array.from(chatMessages.children).reverse();
+            for (let i = 0; i < children.length; i++) {
+                const last = children[i];
+                if (last && last.classList.contains('message') && last.classList.contains('user') && last.dataset.temp === '1') {
+                    // 检查用户名和文本内容是否匹配（允许文本内容有小差异，因为服务器可能做了处理）
+                    const lastUsername = last.dataset.username || '';
+                    const lastText = last.querySelector('.text')?.textContent?.trim() || '';
+                    const msgUsername = message.username || '';
+                    const msgText = message.text?.trim() || '';
+                    
+                    // 如果用户名匹配，且文本内容相同或相似（允许服务器做了长度补强），则替换
+                    if (lastUsername === msgUsername && (lastText === msgText || msgText.includes(lastText) || lastText.includes(msgText))) {
+                        // 替换内容
+                        const updated = createMessageElement(message);
+                        chatMessages.replaceChild(updated, last);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                        return;
+                    }
+                    // 如果用户名匹配但文本不匹配，说明可能是不同的消息，继续查找下一个
+                    // 但如果已经查找了最近3条消息都没匹配，就停止查找（避免替换错误的消息）
+                    if (i >= 2) break;
+                } else if (last && last.classList.contains('message') && !last.classList.contains('user')) {
+                    // 遇到非用户消息，停止查找（临时消息应该在最后）
+                    break;
+                }
+            }
+        }
+        const messageElement = createMessageElement(message);
+        chatMessages.appendChild(messageElement);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // 统一创建消息DOM（供渲染与乐观替换复用）
+    function createMessageElement(message) {
     const messageElement = document.createElement('div');
     // 支持基于来源的样式：如果消息包含 from/is_user 字段，则加上 user/npc 类
     const srcClass = (message.from === 'user' || message.is_user) ? ' user' : ' npc';
@@ -250,7 +312,7 @@ document.addEventListener('DOMContentLoaded', function() {
         messageElement.innerHTML = `
             <div class="content">
                 <div class="header">
-                    <a href="#" class="username profile-link">${message.username}</a>
+                    <a href="#" class="username profile-link" data-username="${message.username}" data-role-code="${message.uuid || ''}">${message.username}</a>
                     <span class="timestamp">${message.timestamp}</span>
                 </div>
                 <div class="text-wrapper">
@@ -268,6 +330,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const textElement = messageElement.querySelector('.text');
         const editButtons = messageElement.querySelector('.edit-buttons');
         const editIcon = messageElement.querySelector('.edit-icon');
+        const usernameLink = messageElement.querySelector('.username.profile-link');
+        
+        // 为用户名链接添加点击事件
+        if (usernameLink) {
+            usernameLink.addEventListener('click', function(e) {
+                e.preventDefault();
+                const username = this.getAttribute('data-username');
+                // 如果不是"User"，则显示角色信息
+                if (username && username !== 'User' && username !== 'System') {
+                    openProfileModalByName(username);
+                }
+            });
+        }
 
         // 存储原始文本并使用全局编辑状态管理
         const originalText = message.text;
@@ -338,8 +413,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     
-        chatMessages.appendChild(messageElement);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return messageElement;
     }
     // 添加系统消息
     function addSystemMessage(text) {
@@ -356,20 +430,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 发送消息
     function sendMessage() {
+        // 只有在等待输入时（选择了角色且轮到该角色）才允许发送消息
+        if (!waitingForInput) {
+            alert('请先选择角色并等待轮到您行动时再发送消息');
+            return;
+        }
+        
         const text = textarea.value.trim();
         if (!text) {
             // 空输入提示
-            if (waitingForInput) {
                 alert('请输入内容');
-            }
             return;
         }
         
         if (ws.readyState === WebSocket.OPEN) {
+            // 立即在前端显示用户输入（乐观渲染），待服务器回显后“对齐/替换”
+            const clientTimestamp = new Date().toLocaleString();
+            appendLocalUserMessage({
+                username: selectedRoleName || (window.selectedRoleName || 'User'),
+                timestamp: clientTimestamp,
+                text: text
+            });
+
             const message = {
                 type: 'user_message',
                 text: text,
-                timestamp: new Date().toLocaleString()
+                timestamp: clientTimestamp
             };
             ws.send(JSON.stringify(message));
             textarea.value = '';
@@ -378,6 +464,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (waitingForInput) {
                 waitingForInput = false;
                 textarea.placeholder = 'input';
+                // 禁用发送按钮
+                updateSendButtonState();
                 // 隐藏AI自动完成按钮
                 if (autoCompleteBtn) {
                     autoCompleteBtn.style.display = 'none';
@@ -385,6 +473,49 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
+    
+    // 乐观渲染：立即追加一条本地用户消息，并标记为临时
+    function appendLocalUserMessage(msg) {
+        const tempMessage = {
+            username: msg.username || 'User',
+            type: 'role',
+            timestamp: msg.timestamp || new Date().toLocaleString(),
+            text: msg.text,
+            is_user: true,
+            uuid: ''  // 无uuid
+        };
+        const el = createMessageElement(tempMessage);
+        // 标记为临时，用于后续服务器回显时对齐
+        el.dataset.temp = '1';
+        chatMessages.appendChild(el);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // 更新发送按钮状态
+    function updateSendButtonState() {
+        if (sendButton) {
+            if (waitingForInput) {
+                sendButton.disabled = false;
+                sendButton.style.opacity = '1';
+                sendButton.style.cursor = 'pointer';
+            } else {
+                sendButton.disabled = true;
+                sendButton.style.opacity = '0.5';
+                sendButton.style.cursor = 'not-allowed';
+            }
+        }
+        if (textarea) {
+            if (waitingForInput) {
+                textarea.disabled = false;
+            } else {
+                textarea.disabled = true;
+                textarea.placeholder = '请先选择角色并等待轮到您行动';
+            }
+        }
+    }
+    
+    // 初始化发送按钮状态
+    updateSendButtonState();
 
     // AI自动完成按钮点击事件
     if (autoCompleteBtn) {
@@ -628,6 +759,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 取消选择角色
     function clearRoleSelection() {
         selectedRoleName = null;
+        window.selectedRoleName = null;
         
         // 发送取消选择消息
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -645,7 +777,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (selectedSection) {
             selectedSection.style.display = 'none';
         }
-        document.querySelectorAll('.character-card').forEach(card => card.classList.remove('is-selected'));
+        
+        // 重新渲染角色列表，移除选中状态
+        if (window.characterProfiles && window.characterProfiles.characters) {
+            window.characterProfiles.renderCharacters(window.characterProfiles.characters);
+        }
         
         // 更新模式指示器
         if (window.soulversePanel && window.soulversePanel.updateModeIndicator) {
@@ -655,54 +791,26 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 显示选中的角色
     function showSelectedCharacter(character) {
-        const selectedSection = document.getElementById('selectedCharacterSection');
-        const selectedCard = document.getElementById('selectedCharacterCard');
+        // 更新全局选中的角色名称，用于重新渲染时排序
+        window.selectedRoleName = character.name || character.nickname || character.code || character.role_code || null;
         
-        if (!selectedSection || !selectedCard) return;
-        
-        // 创建选中角色的卡片
-        const name = character.name || character.nickname || '未知角色';
-        const description = character.description || '';
-        const location = character.location || '—';
-        const goal = character.goal || '—';
-        const state = character.state || '—';
-        
-        selectedCard.innerHTML = `
-            <div class="selected-character-info">
-                <div class="selected-character-name">${name}</div>
-                ${description ? `<div class="selected-character-description">${description}</div>` : ''}
-                <div class="selected-character-details">
-                    <div class="selected-character-location">📍 ${location}</div>
-                    <div class="selected-character-goal">🎯 ${goal}</div>
-                    <div class="selected-character-state">⚡ ${state}</div>
-                </div>
-            </div>
-        `;
-        
-        // 显示选中区域
-        selectedSection.style.display = 'block';
-        
-        // 高亮对应的角色卡片
-        const highlightCode = character.code || character.role_code || character.name || character.nickname;
-        document.querySelectorAll('.character-card').forEach(card => card.classList.remove('is-selected'));
-        if (highlightCode) {
-            let targetCard = null;
-            if (window.CSS && typeof window.CSS.escape === 'function') {
-                const escaped = window.CSS.escape(String(highlightCode));
-                targetCard = document.querySelector(`.character-card[data-code="${escaped}"]`);
-            } else {
-                targetCard = Array.from(document.querySelectorAll('.character-card')).find(
-                    card => String(card.dataset.code || '') === String(highlightCode)
-                );
-            }
-            if (targetCard) {
-                targetCard.classList.add('is-selected');
-            }
+        // 触发角色列表重新渲染，使选中的角色置顶
+        if (window.characterProfiles && window.characterProfiles.characters) {
+            window.characterProfiles.renderCharacters(window.characterProfiles.characters);
         }
+        
+        // 隐藏原来的选中区域（因为现在选中的卡片会置顶显示）
+        const selectedSection = document.getElementById('selectedCharacterSection');
+        if (selectedSection) {
+            selectedSection.style.display = 'none';
+            }
     }
 
-    // 绑定发送按钮点击事件
-    sendButton.addEventListener('click', sendMessage);
+    // 绑定发送按钮点击事件（阻止表单默认提交）
+    sendButton.addEventListener('click', function(e) {
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        sendMessage();
+    });
 
     // 绑定回车键发送
     textarea.addEventListener('keypress', function(e) {
@@ -739,81 +847,68 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     function openProfileModalByName(name) {
-        const modal = document.getElementById('profile-modal');
-        if (!modal) return;
-        // Try to find character data from the left-side CharacterProfiles instance
-        const profiles = window.characterProfiles && window.characterProfiles.allCharacters ? window.characterProfiles.allCharacters : (window.characterProfiles && window.characterProfiles.characters ? window.characterProfiles.characters : []);
-        let character = profiles.find(c => String(c.name || c.nickname || c.id) === String(name) || String(c.nickname || '') === String(name));
-        // Fallback: try matching by nickname or id
+        // 使用CharacterProfiles的showCharacterDetails方法
+        if (window.characterProfiles && typeof window.characterProfiles.showCharacterDetails === 'function') {
+            // 从角色列表中查找角色信息
+            const profiles = window.characterProfiles.allCharacters || window.characterProfiles.characters || [];
+            let character = null;
+            
+            // 首先尝试精确匹配name
+            character = profiles.find(char => 
+                char.name === name || 
+                char.nickname === name ||
+                char.role_name === name
+            );
+            
+            // 如果没找到，尝试模糊匹配（去除"用户_"前缀等）
         if (!character) {
-            character = profiles.find(c => (c.nickname && c.nickname === name));
-        }
-
-        // Populate modal (do not show motivation)
-        const nameEl = modal.querySelector('.modal-name');
-        const descEl = modal.querySelector('.modal-description');
-        const avatarEl = modal.querySelector('.modal-avatar');
-        const locEl = modal.querySelector('.modal-location');
-        const goalEl = modal.querySelector('.modal-goal');
-        const stateEl = modal.querySelector('.modal-state');
+                const normalizedName = name.replace(/^用户_/, '').replace(/^用户/, '').trim();
+                character = profiles.find(char => {
+                    const charName = (char.name || '').replace(/^用户_/, '').replace(/^用户/, '').trim();
+                    const charNickname = (char.nickname || '').replace(/^用户_/, '').replace(/^用户/, '').trim();
+                    const charRoleName = (char.role_name || '').replace(/^用户_/, '').replace(/^用户/, '').trim();
+                    return charName === normalizedName || 
+                           charNickname === normalizedName ||
+                           charRoleName === normalizedName;
+                });
+            }
 
         if (character) {
-            nameEl.textContent = character.name || character.nickname || name;
-            descEl.textContent = character.description || character.brief || '';
-            avatarEl.src = character.icon || './frontend/assets/images/default-icon.jpg';
-            locEl.textContent = character.location || '—';
-            goalEl.textContent = character.goal || '—';
-            stateEl.textContent = character.state || character.status || '—';
+                // 使用CharacterProfiles的方法显示详细信息
+                window.characterProfiles.showCharacterDetails(character);
         } else {
-            // Minimal fallback when no character data
-            nameEl.textContent = name;
-            descEl.textContent = '';
-            avatarEl.src = './frontend/assets/images/default-icon.jpg';
-            locEl.textContent = '—';
-            goalEl.textContent = '—';
-            stateEl.textContent = '—';
+                console.warn('未找到角色信息:', name);
+                // 如果找不到，显示基本提示
+                alert(`未找到角色 "${name}" 的详细信息`);
         }
-
-        modal.classList.remove('hidden');
-        modal.setAttribute('aria-hidden', 'false');
-        // Close handlers (支持 overlay 点击和 ESC 键)
-        const closeBtn = modal.querySelector('.modal-close');
-        const overlay = modal.querySelector('.modal-overlay');
-        function close() {
-            modal.classList.add('hidden');
-            modal.setAttribute('aria-hidden', 'true');
-            closeBtn.removeEventListener('click', close);
-            overlay.removeEventListener('click', close);
-            document.removeEventListener('keydown', onKeyDown);
+            } else {
+            console.warn('CharacterProfiles未初始化或showCharacterDetails方法不存在');
         }
-        function onKeyDown(e) {
-            if (e.key === 'Escape') close();
-        }
-        closeBtn.addEventListener('click', close);
-        overlay.addEventListener('click', close);
-        document.addEventListener('keydown', onKeyDown);
     }
-    
+
     // 添加导出社交报告按钮的点击事件
     exportStoryBtn.addEventListener('click', function() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
         // 显示加载状态
         exportStoryBtn.disabled = true;
         exportStoryBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>生成中...</span>';
         
-        // 如果当前选择了Agent，导出该Agent的报告；否则导出所有Agent的报告
-        const selectedAgentCode = window.soulversePanel?.currentAgentCode || null;
-        
+            // 如果当前选择了Agent，导出该Agent的报告；否则导出所有Agent的报告
+            const selectedAgentCode = window.soulversePanel?.currentAgentCode || null;
+            
+            // 请求JSON格式的报告（包含图表数据）
         ws.send(JSON.stringify({
-            type: 'generate_social_report',
-            agent_code: selectedAgentCode
+                type: 'generate_social_report',
+                agent_code: selectedAgentCode,
+                format: 'json'  // 请求JSON格式，包含图表数据
         }));
+        }
     });
     
     // 显示故事模态框
     function showStoryModal(storyText, timestamp) {
         const modal = document.getElementById('story-modal');
         const content = document.getElementById('storyContent');
-        const downloadBtn = document.getElementById('downloadStoryBtn');
         
         if (!modal || !content) {
             console.error('故事模态框元素未找到');
@@ -824,19 +919,38 @@ document.addEventListener('DOMContentLoaded', function() {
         exportStoryBtn.disabled = false;
         exportStoryBtn.innerHTML = '<i class="fas fa-book"></i><span data-i18n="exportStory">输出故事</span>';
         
-        // 设置故事内容
-        content.textContent = storyText;
+        // 清空并重建结构：头部 + markdown内容
+        content.innerHTML = '';
+        
+        const container = document.createElement('div');
+        container.className = 'social-report-container';
+        
+        const header = document.createElement('div');
+        header.className = 'report-header';
+        header.innerHTML = `
+            <h1>社交报告</h1>
+            <div class="report-meta">
+                <span><i class="fas fa-calendar"></i> ${timestamp || ''}</span>
+            </div>
+        `;
+        container.appendChild(header);
+        
+        const section = document.createElement('div');
+        section.className = 'report-section';
+        
+        const mdWrapper = document.createElement('div');
+        mdWrapper.className = 'report-markdown';
+        mdWrapper.style.lineHeight = '1.8';
+        mdWrapper.style.color = '#334155';
+        mdWrapper.innerHTML = renderMarkdown(storyText || '暂无内容');
+        
+        section.appendChild(mdWrapper);
+        container.appendChild(section);
+        content.appendChild(container);
         
         // 显示模态框
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
-        
-        // 设置下载功能
-        if (downloadBtn) {
-            downloadBtn.onclick = function() {
-                downloadStory(storyText, timestamp);
-            };
-        }
         
         // 设置关闭事件
         const closeBtn = modal.querySelector('.modal-close');
@@ -845,7 +959,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function closeModal() {
             modal.classList.add('hidden');
             modal.setAttribute('aria-hidden', 'true');
-            closeBtn.removeEventListener('click', closeModal);
+            closeBtn && closeBtn.removeEventListener('click', closeModal);
             if (overlay) overlay.removeEventListener('click', closeModal);
             document.removeEventListener('keydown', onKeyDown);
         }
@@ -854,23 +968,49 @@ document.addEventListener('DOMContentLoaded', function() {
             if (e.key === 'Escape') closeModal();
         }
         
-        closeBtn.addEventListener('click', closeModal);
+        closeBtn && closeBtn.addEventListener('click', closeModal);
         if (overlay) overlay.addEventListener('click', closeModal);
         document.addEventListener('keydown', onKeyDown);
     }
     
-    // 下载故事
-    function downloadStory(storyText, timestamp) {
-        const filename = `story_${timestamp || new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-        const blob = new Blob([storyText], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+    // 更友好的Markdown渲染（基础标题、列表、粗斜体、换行）
+    function renderMarkdown(md) {
+        if (!md) return '';
+        let html = md;
+        html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html = html
+            .replace(/^# (.*)$/gim, '<h1 style="margin: 20px 0 12px; font-size: 24px; font-weight: 700; color:#1e293b;">$1</h1>')
+            .replace(/^## (.*)$/gim, '<h2 style="margin: 18px 0 10px; font-size: 20px; font-weight: 600; color:#334155;">$1</h2>')
+            .replace(/^### (.*)$/gim, '<h3 style="margin: 14px 0 8px; font-size: 16px; font-weight: 600; color:#475569;">$1</h3>')
+            .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/gim, '<em>$1</em>');
+        // 列表：将以 * 或 - 开头的行包裹到 <ul>
+        const lines = html.split('\n');
+        let inList = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (/^\s*([*-])\s+/.test(line)) {
+                const item = line.replace(/^\s*([*-])\s+/, '');
+                lines[i] = `<li style="margin:6px 0; padding-left:4px; list-style: disc;">${item}</li>`;
+                if (!inList) {
+                    lines[i] = `<ul style="padding-left:20px; margin: 8px 0;">` + lines[i];
+                    inList = true;
+                }
+            } else {
+                if (inList) {
+                    lines[i - 1] = lines[i - 1] + `</ul>`;
+                    inList = false;
+                }
+            }
+        }
+        if (inList && lines.length > 0) {
+            lines[lines.length - 1] = lines[lines.length - 1] + `</ul>`;
+            inList = false;
+        }
+        // 段落换行
+        html = lines.join('\n').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>');
+        html = `<p>${html}</p>`;
+        return html;
     }
     
     // 显示AI选项选择模态框

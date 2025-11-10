@@ -39,9 +39,11 @@ class ConnectionManager:
         self.story_tasks: dict[str, asyncio.Task] = {}
         self.user_selected_roles: dict[str, str] = {}  # client_id -> role_code
         self.waiting_for_input: dict[str, bool] = {}  # client_id -> bool
-        self.pending_user_inputs: dict[str, asyncio.Future] = {}  # client_id -> Future
+        self.pending_user_inputs: dict[str, asyncio.Future] = {}  # client_id -> Future  
         self.possession_mode: dict[str, bool] = {}  # client_id -> bool (是否处于灵魂降临模式)
         self.user_agents: dict[str, str] = {}  # user_id -> role_code (用户ID到Agent代码的映射)  
+        # 待显示的用户消息（不立即显示，等下一条agent消息前一并发送）
+        self.pending_display_message: dict[str, dict] = {}  # client_id -> message dict
         if True:
             if "preset_path" in config and config["preset_path"]:
                 if os.path.exists(config["preset_path"]):
@@ -171,6 +173,24 @@ class ConnectionManager:
         try:
             while True:
                 if client_id in self.active_connections:
+                    # 获取用户选择的角色（如果用户选择了角色，用于后续检查）
+                    user_role_code = self.user_selected_roles.get(client_id)
+                    
+                    # 如果用户选择了角色，设置标志供生成器使用
+                    # 生成器会根据这个标志判断：当系统决定用户角色行动时，跳过plan()调用，等待用户输入
+                    # 注意：这个标志在Goal Setting阶段也会被使用，但Goal Setting阶段用户角色的消息不会yield
+                    if user_role_code:
+                        self.scrollweaver.server._user_role_code = user_role_code
+                    else:
+                        # 如果用户没有选择角色，清除标志
+                        if hasattr(self.scrollweaver.server, '_user_role_code'):
+                            delattr(self.scrollweaver.server, '_user_role_code')
+                    
+                    # 从生成器获取下一条消息
+                    # 生成器会正常调用decide_next_actor决定下一个角色
+                    # 如果决定的是用户角色，生成器会返回占位消息（跳过plan()调用）
+                    # 如果决定的是其他角色，生成器会正常调用plan()生成计划
+                    # 注意：在Goal Setting阶段，用户角色的消息不会yield，所以不会触发用户输入
                     message,status = await self.get_next_message()
                     
                     # 检查生成器是否已结束
@@ -182,8 +202,10 @@ class ConnectionManager:
                         break
                     
                     # 检查是否轮到用户选择的角色（观察者模式或灵魂降临模式）
-                    user_role_code = self.user_selected_roles.get(client_id)
                     is_possession_mode = self.possession_mode.get(client_id, False)
+                    
+                    # 检查是否是占位消息（占位消息不应该发送到前端）
+                    is_placeholder = message.get('text', '').strip().startswith('__USER_INPUT_PLACEHOLDER__')
                     
                     if user_role_code and message.get('type') == 'role':
                         # 检查当前消息的角色代码是否匹配用户选择的角色
@@ -191,75 +213,115 @@ class ConnectionManager:
                         current_role_code = self._get_role_code_by_name(message.get('username', ''))
                         
                         if current_role_code and current_role_code == user_role_code:
-                            # 如果是灵魂降临模式，总是等待用户输入；否则只在观察者模式等待
-                            # 暂停生成，等待用户输入
-                            self.waiting_for_input[client_id] = True
-                            await self.active_connections[client_id].send_json({
-                                'type': 'waiting_for_user_input',
-                                'data': {
-                                    'role_name': message.get('username'),
-                                    'message': '请为角色输入内容'
-                                }
-                            })
-                            
-                            # 等待用户输入
-                            if client_id not in self.pending_user_inputs:
-                                self.pending_user_inputs[client_id] = asyncio.Future()
-                            
-                            try:
-                                user_text = await asyncio.wait_for(
-                                    self.pending_user_inputs[client_id], 
-                                    timeout=None
-                                )
-                                # 用户输入已收到，用用户输入替换消息内容
+                            # 如果是占位消息，不发送到前端，直接等待用户输入
+                            if is_placeholder:
                                 original_uuid = message.get('uuid')
-                                if not user_text.strip():
-                                    # 空输入，继续等待
-                                    await self.active_connections[client_id].send_json({
-                                        'type': 'error',
-                                        'data': {'message': '输入不能为空，请重新输入'}
-                                    })
-                                    # 重新创建Future继续等待
+                                
+                                # 暂停生成，等待用户输入（不发送占位消息到前端）
+                                self.waiting_for_input[client_id] = True
+                                await self.active_connections[client_id].send_json({
+                                    'type': 'waiting_for_user_input',
+                                    'data': {
+                                        'role_name': message.get('username'),
+                                        'message': '请为角色输入内容'
+                                    }
+                                })
+                                
+                                # 等待用户输入
+                                if client_id not in self.pending_user_inputs:
                                     self.pending_user_inputs[client_id] = asyncio.Future()
-                                    continue
                                 
-                                message['text'] = user_text
-                                message['is_user'] = True
-                                
-                                # 更新历史记录中的detail
-                                if original_uuid:
-                                    try:
-                                        self.scrollweaver.server.history_manager.modify_record(
-                                            original_uuid, 
-                                            user_text
-                                        )
-                                    except Exception as e:
-                                        print(f"Error modifying record {original_uuid}: {e}")
-                                        # 如果修改失败，创建新记录
-                                        await self.handle_user_role_input(client_id, user_role_code, user_text)
+                                try:
+                                    user_text = await asyncio.wait_for(
+                                        self.pending_user_inputs[client_id], 
+                                        timeout=None
+                                    )
+                                    # 用户输入已收到，用用户输入替换消息内容
+                                    if not user_text.strip():
+                                        # 空输入，继续等待
+                                        await self.active_connections[client_id].send_json({
+                                            'type': 'error',
+                                            'data': {'message': '输入不能为空，请重新输入'}
+                                        })
+                                        # 重新创建Future继续等待
+                                        self.pending_user_inputs[client_id] = asyncio.Future()
                                         continue
-                                else:
-                                    # 如果没有uuid，需要创建新记录
-                                    await self.handle_user_role_input(client_id, user_role_code, user_text)
-                                    # 跳过当前消息，因为已经通过handle_user_role_input发送了
-                                    continue
-                                
-                                # 清除future
-                                if client_id in self.pending_user_inputs:
-                                    del self.pending_user_inputs[client_id]
-                                self.waiting_for_input[client_id] = False
-                            except asyncio.CancelledError:
-                                break
-                            except Exception as e:
-                                print(f"Error waiting for user input: {e}")
-                                import traceback
-                                traceback.print_exc()
-                                # 清理状态并继续
-                                if client_id in self.pending_user_inputs:
-                                    del self.pending_user_inputs[client_id]
-                                self.waiting_for_input[client_id] = False
+                                    
+                                    # 长度补强：用于LLM上下文，增强可见度；前端仍显示原文
+                                    def _augment_for_context(text: str, min_len: int = 40) -> str:
+                                        t = text.strip()
+                                        if len(t) >= min_len:
+                                            return t
+                                        # 简单语义补全：复述+展开意图
+                                        return f"{t}\n（解释：以上是用户的核心意图描述。请围绕其意图、对象与期望回应进行具体、直接的回应与推进。）"
+                                    
+                                    augmented_text = _augment_for_context(user_text)
+
+                                    # 修改占位记录（写入增强文本以提升LLM权重）
+                                    if original_uuid:
+                                        try:
+                                            # 修改占位记录
+                                            self.scrollweaver.server.history_manager.modify_record(original_uuid, augmented_text)
+
+                                            # 立即回显用户消息到前端（显示原文）
+                                            echo_msg = dict(message)
+                                            echo_msg['text'] = user_text
+                                            echo_msg['is_user'] = True
+                                            echo_msg['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            await self.active_connections[client_id].send_json({
+                                                'type': 'message',
+                                                'data': echo_msg
+                                            })
+
+                                            # 清除future和等待状态（继续推进生成，下一条将是其他Agent响应）
+                                            if client_id in self.pending_user_inputs:
+                                                del self.pending_user_inputs[client_id]
+                                            self.waiting_for_input[client_id] = False
+                                            
+                                            # 继续循环，获取下一条消息（下一个agent的响应）
+                                            continue
+                                        except Exception as e:
+                                            print(f"Error modifying placeholder record {original_uuid}: {e}")
+                                            # 如果修改失败，创建新记录（立即显示）
+                                            await self.handle_user_role_input(client_id, user_role_code, user_text, delay_display=False)
+                                            continue
+                                    else:
+                                        # 如果没有uuid，创建新记录（立即显示）
+                                        await self.handle_user_role_input(client_id, user_role_code, user_text, delay_display=False)
+                                        continue
+                                    
+                                except asyncio.CancelledError:
+                                    break
+                                except Exception as e:
+                                    print(f"Error waiting for user input: {e}")
+                                    import traceback
+                                    traceback.print_exc()
+                                    # 清理状态并继续
+                                    if client_id in self.pending_user_inputs:
+                                        del self.pending_user_inputs[client_id]
+                                    self.waiting_for_input[client_id] = False
+                            else:
+                                # 不是占位消息，但用户角色被选中，这不应该发生
+                                # 正常发送消息（这种情况理论上不应该出现）
+                                await self.active_connections[client_id].send_json({
+                                    'type': 'message',
+                                    'data': message
+                                })
+                                if status is not None:
+                                    await self.active_connections[client_id].send_json({
+                                        'type': 'status_update',
+                                        'data': status
+                                    })
+                                await asyncio.sleep(0.2)
+                                continue
                     
-                    # 正常发送消息
+                    # 如果是占位消息但不在用户角色处理中，跳过（不应该发生）
+                    if is_placeholder:
+                        # 占位消息不应该发送到前端，直接跳过
+                        continue
+                    
+                    # 正常发送消息（非占位消息，非用户角色）
+
                     await self.active_connections[client_id].send_json({
                         'type': 'message',
                         'data': message
@@ -416,8 +478,10 @@ class ConnectionManager:
             traceback.print_exc()
             return None
     
-    async def handle_user_role_input(self, client_id: str, role_code: str, user_text: str):
-        """处理用户输入作为角色消息（当消息没有uuid时使用）"""
+    async def handle_user_role_input(self, client_id: str, role_code: str, user_text: str, delay_display: bool = False):
+        """处理用户输入作为角色消息（当消息没有uuid时使用）
+        如果 delay_display=True，则不立即发送消息到前端，交给generate_story在下条Agent消息前发送
+        """
         try:
             # 生成record_id
             import uuid
@@ -447,18 +511,20 @@ class ConnectionManager:
                 'is_user': True  # 标记为用户输入
             }
             
-            # 发送消息
-            await self.active_connections[client_id].send_json({
-                'type': 'message',
-                'data': message
-            })
-            
-            # 发送状态更新
-            status = self.scrollweaver.get_current_status()
-            await self.active_connections[client_id].send_json({
-                'type': 'status_update',
-                'data': status
-            })
+            # 若设置延迟显示，则缓存；否则立即发送
+            if delay_display:
+                self.pending_display_message[client_id] = message
+            else:
+                await self.active_connections[client_id].send_json({
+                    'type': 'message',
+                    'data': message
+                })
+                # 发送状态更新
+                status = self.scrollweaver.get_current_status()
+                await self.active_connections[client_id].send_json({
+                    'type': 'status_update',
+                    'data': status
+                })
             
         except Exception as e:
             print(f"Error handling user role input: {e}")
@@ -559,13 +625,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             
             if message['type'] == 'user_message':
                 # 处理用户消息
+                user_text_incoming = message.get('text', '').strip()
+
+                # 优先处理“正在等待用户输入”的情况（即使近期记录仍显示为goal setting也应接收）
                 if client_id in manager.waiting_for_input and manager.waiting_for_input[client_id]:
-                    # 如果正在等待用户输入，将输入传递给生成器
+                    # 正常等待用户输入，处理用户输入
                     if client_id in manager.pending_user_inputs:
                         if not manager.pending_user_inputs[client_id].done():
-                            user_text = message.get('text', '').strip()
-                            if user_text:  # 只处理非空输入
-                                manager.pending_user_inputs[client_id].set_result(user_text)
+                            if user_text_incoming:
+                                manager.pending_user_inputs[client_id].set_result(user_text_incoming)
                             else:
                                 # 空输入，提示用户
                                 await websocket.send_json({
@@ -573,16 +641,24 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     'data': {'message': '输入不能为空，请重新输入'}
                                 })
                 else:
-                    # 普通用户消息（未集成到故事系统）
-                    await websocket.send_json({
-                        'type': 'message',
-                        'data': {
-                            'username': 'User',
-                            'timestamp': message['timestamp'],
-                            'text': message['text'],
-                            'icon': default_icon_path,
-                        }
-                    })
+                    # 非等待态下再检查是否仍处于设置阶段
+                    recent_records = manager.scrollweaver.server.history_manager.detailed_history[-5:] if len(manager.scrollweaver.server.history_manager.detailed_history) >= 5 else manager.scrollweaver.server.history_manager.detailed_history
+                    is_goal_setting_phase = any(
+                        r.get('act_type') == 'goal setting' 
+                        for r in recent_records[-3:]  # 检查最近3条记录
+                    )
+                    if is_goal_setting_phase:
+                        # 处于设置阶段：不缓存，不等待，直接告知设置进行中（用户目标将自动生成）
+                        await websocket.send_json({
+                            'type': 'info',
+                            'data': {'message': '正在设置阶段，系统将自动生成角色目标，请稍候'}
+                        })
+                    else:
+                        # 不在等待输入状态：提示等待轮到你再发送
+                        await websocket.send_json({
+                            'type': 'error',
+                            'data': {'message': '请先选择角色并等待轮到您行动时再发送消息'}
+                        })
             
             elif message['type'] == 'select_role':
                 # 处理角色选择
@@ -632,8 +708,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     'type': 'error',
                     'data': {
                         'message': '模式切换已废弃，请通过选择/取消选择角色来切换模式'
-                    }
-                })
+                            }
+                        })
             
             elif message['type'] == 'request_characters':
                 # 请求角色列表
@@ -740,14 +816,27 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 # 生成社交报告（Soulverse模式）或故事（传统模式）
                 try:
                     agent_code = message.get('agent_code')  # 可选，指定Agent
-                    report_text = manager.scrollweaver.generate_social_report(agent_code=agent_code)
-                    # 发送生成的报告
+                    format_type = message.get('format', 'json')  # 默认使用json格式，简化报告
+                    
+                    # 简化报告：只生成文本格式，不包含复杂的图表数据
+                    report_text = manager.scrollweaver.generate_social_report(agent_code=agent_code, format='text')
+                    
+                    # 构建简化的报告数据
+                    report_data = {
+                        'report_text': report_text,
+                        'agent_name': agent_code or '所有Agent',
+                        'agent_code': agent_code,
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
                     await websocket.send_json({
                         'type': 'social_report_exported',
                         'data': {
                             'report': report_text,
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'agent_code': agent_code
+                            'report_data': report_data,  # 简化的结构化数据
+                            'timestamp': report_data['timestamp'],
+                            'agent_code': agent_code,
+                            'format': 'json'
                         }
                     })
                 except Exception as e:
@@ -798,6 +887,9 @@ async def create_user_agent(request: Request):
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
         
+        # 获取最新的角色列表（包含新创建的Agent）
+        characters_info = manager.scrollweaver.get_characters_info()
+        
         return {
             "success": True,
             "agent_info": {
@@ -806,7 +898,8 @@ async def create_user_agent(request: Request):
                 "nickname": user_agent.nickname,
                 "location": user_agent.location_name,
                 "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile
-            }
+            },
+            "characters": characters_info  # 返回最新的角色列表
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -850,6 +943,9 @@ async def create_agent_from_text(request: Request):
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
         
+        # 获取最新的角色列表（包含新创建的Agent）
+        characters_info = manager.scrollweaver.get_characters_info()
+        
         return {
             "success": True,
             "agent_info": {
@@ -859,7 +955,8 @@ async def create_agent_from_text(request: Request):
                 "location": user_agent.location_name,
                 "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile,
                 "extracted_profile": soul_profile
-            }
+            },
+            "characters": characters_info  # 返回最新的角色列表
         }
     except Exception as e:
         print(f"Error creating agent from text: {e}")
@@ -904,6 +1001,9 @@ async def create_agent_from_file(
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
         
+        # 获取最新的角色列表（包含新创建的Agent）
+        characters_info = manager.scrollweaver.get_characters_info()
+        
         return {
             "success": True,
             "agent_info": {
@@ -913,7 +1013,8 @@ async def create_agent_from_file(
                 "location": user_agent.location_name,
                 "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile,
                 "extracted_profile": soul_profile
-            }
+            },
+            "characters": characters_info  # 返回最新的角色列表
         }
     except Exception as e:
         print(f"Error creating agent from file: {e}")
@@ -954,6 +1055,9 @@ async def create_agent_from_qa(request: Request):
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
         
+        # 获取最新的角色列表（包含新创建的Agent）
+        characters_info = manager.scrollweaver.get_characters_info()
+        
         return {
             "success": True,
             "agent_info": {
@@ -963,7 +1067,8 @@ async def create_agent_from_qa(request: Request):
                 "location": user_agent.location_name,
                 "profile": user_agent.role_profile[:200] + "..." if len(user_agent.role_profile) > 200 else user_agent.role_profile,
                 "extracted_profile": soul_profile
-            }
+            },
+            "characters": characters_info  # 返回最新的角色列表
         }
     except Exception as e:
         print(f"Error creating agent from QA: {e}")

@@ -62,8 +62,13 @@ class SoulversePanel {
         const modalHTML = `
             <div id="createAgentModal" class="soulverse-modal hidden" aria-hidden="true">
                 <div class="soulverse-modal-overlay"></div>
-                <div class="soulverse-modal-card">
-                    <button class="soulverse-modal-close" aria-label="关闭">&times;</button>
+                <div class="soulverse-modal-card" id="createAgentModalCard">
+                    <div class="soulverse-modal-loading" id="createAgentLoading">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text" id="loadingText">正在创建Agent...</div>
+                        <div class="loading-subtext" id="loadingSubtext">这可能需要几秒钟时间，请稍候</div>
+                    </div>
+                    <button class="soulverse-modal-close" aria-label="关闭" id="createAgentModalClose">&times;</button>
                     <div class="soulverse-modal-content">
                         <div class="soulverse-modal-header">
                             <h2>创建我的AI Agent</h2>
@@ -224,6 +229,46 @@ class SoulversePanel {
         if (modal) {
             modal.classList.add('hidden');
             modal.setAttribute('aria-hidden', 'true');
+            // 重置加载状态
+            this.hideLoading();
+        }
+    }
+
+    showLoading(message = '正在处理...', submessage = '这可能需要几秒钟时间，请稍候') {
+        const loading = document.getElementById('createAgentLoading');
+        const loadingText = document.getElementById('loadingText');
+        const loadingSubtext = document.getElementById('loadingSubtext');
+        const modalCard = document.getElementById('createAgentModalCard');
+        const closeBtn = document.getElementById('createAgentModalClose');
+        
+        if (loading) {
+            loadingText.textContent = message;
+            loadingSubtext.textContent = submessage;
+            loading.classList.add('active');
+        }
+        if (modalCard) {
+            modalCard.classList.add('loading');
+        }
+        if (closeBtn) {
+            closeBtn.style.pointerEvents = 'none';
+            closeBtn.style.opacity = '0.5';
+        }
+    }
+
+    hideLoading() {
+        const loading = document.getElementById('createAgentLoading');
+        const modalCard = document.getElementById('createAgentModalCard');
+        const closeBtn = document.getElementById('createAgentModalClose');
+        
+        if (loading) {
+            loading.classList.remove('active');
+        }
+        if (modalCard) {
+            modalCard.classList.remove('loading');
+        }
+        if (closeBtn) {
+            closeBtn.style.pointerEvents = '';
+            closeBtn.style.opacity = '';
         }
     }
 
@@ -526,15 +571,23 @@ class SoulversePanel {
     async createAgentFromText() {
         const userId = document.getElementById('userIdInputText')?.value;
         const text = document.getElementById('textInput')?.value;
+        const createBtn = document.getElementById('createFromTextBtn');
 
         if (!userId || !userId.trim()) {
-            alert('请填写用户ID');
+            alert('请填写Agent名称');
             return;
         }
 
         if (!text || !text.trim()) {
             alert('请输入文本内容');
             return;
+        }
+
+        // 显示加载状态
+        this.showLoading('正在分析文本...', 'AI正在从文本中提取你的兴趣、性格和社交目标，请稍候');
+        if (createBtn) {
+            createBtn.disabled = true;
+            createBtn.classList.add('loading');
         }
 
         try {
@@ -549,20 +602,47 @@ class SoulversePanel {
                 })
             });
 
+            // 更新加载提示
+            this.showLoading('正在创建Agent...', '正在将提取的信息转换为Agent配置');
+
             const result = await response.json();
+            
+            // 隐藏加载状态
+            this.hideLoading();
+            if (createBtn) {
+                createBtn.disabled = false;
+                createBtn.classList.remove('loading');
+            }
+
             if (result.success) {
                 this.showSuccessMessage(`Agent创建成功！\n名称: ${result.agent_info.nickname}\n位置: ${result.agent_info.location}`);
                 // 清空输入
                 document.getElementById('textInput').value = '';
                 // 关闭模态框
                 this.closeModal();
-                // 刷新Agent列表
-                this.updateAgentList();
+                
+                // 如果响应中包含角色列表，立即更新
+                if (result.characters && Array.isArray(result.characters)) {
+                    // 直接更新角色列表
+                    if (window.characterProfiles) {
+                        window.characterProfiles.updateCharacters(result.characters);
+                    }
+                    this.updateAgentListFromData(result.characters);
+                } else {
+                    // 否则通过WebSocket请求更新
+                    this.refreshCharacterList();
+                }
             } else {
                 alert('创建失败: ' + (result.message || '未知错误'));
             }
         } catch (error) {
             console.error('Error creating agent from text:', error);
+            // 隐藏加载状态
+            this.hideLoading();
+            if (createBtn) {
+                createBtn.disabled = false;
+                createBtn.classList.remove('loading');
+            }
             alert('创建失败: ' + error.message);
         }
     }
@@ -570,6 +650,7 @@ class SoulversePanel {
     async createAgentFromFile() {
         const fileInput = document.getElementById('fileInput');
         const userId = document.getElementById('userIdInputFile')?.value;
+        const createBtn = document.getElementById('createFromFileBtn');
 
         if (!fileInput.files || fileInput.files.length === 0) {
             alert('请选择文件');
@@ -583,24 +664,63 @@ class SoulversePanel {
             formData.append('user_id', userId.trim());
         }
 
+        // 显示加载状态
+        this.showLoading('正在上传文件...', `正在上传 "${file.name}"，请稍候`);
+        if (createBtn) {
+            createBtn.disabled = true;
+            createBtn.classList.add('loading');
+        }
+
         try {
+            // 更新加载提示
+            this.showLoading('正在分析文件内容...', 'AI正在从文件中提取你的兴趣、性格和社交目标，这可能需要几秒钟');
+
             const response = await fetch('/api/create-agent-from-file', {
                 method: 'POST',
                 body: formData
             });
 
+            // 更新加载提示
+            this.showLoading('正在创建Agent...', '正在将提取的信息转换为Agent配置');
+
             const result = await response.json();
+            
+            // 隐藏加载状态
+            this.hideLoading();
+            if (createBtn) {
+                createBtn.disabled = false;
+                createBtn.classList.remove('loading');
+            }
+
             if (result.success) {
-                alert(`Agent创建成功！\n名称: ${result.agent_info.nickname}\n位置: ${result.agent_info.location}`);
+                this.showSuccessMessage(`Agent创建成功！\n名称: ${result.agent_info.nickname}\n位置: ${result.agent_info.location}`);
                 // 清空文件选择
                 fileInput.value = '';
-                // 刷新Agent列表
-                this.updateAgentList();
+                // 关闭模态框
+                this.closeModal();
+                
+                // 如果响应中包含角色列表，立即更新
+                if (result.characters && Array.isArray(result.characters)) {
+                    // 直接更新角色列表
+                    if (window.characterProfiles) {
+                        window.characterProfiles.updateCharacters(result.characters);
+                    }
+                    this.updateAgentListFromData(result.characters);
+                } else {
+                    // 否则通过WebSocket请求更新
+                    this.refreshCharacterList();
+                }
             } else {
                 alert('创建失败: ' + (result.message || '未知错误'));
             }
         } catch (error) {
             console.error('Error creating agent from file:', error);
+            // 隐藏加载状态
+            this.hideLoading();
+            if (createBtn) {
+                createBtn.disabled = false;
+                createBtn.classList.remove('loading');
+            }
             alert('创建失败: ' + error.message);
         }
     }
@@ -610,9 +730,10 @@ class SoulversePanel {
         const interests = document.getElementById('qaInterests')?.value;
         const personality = document.getElementById('qaPersonality')?.value;
         const socialGoals = document.getElementById('qaSocialGoals')?.value;
+        const createBtn = document.getElementById('createFromQABtn');
 
         if (!userId || !userId.trim()) {
-            alert('请填写用户ID');
+            alert('请填写Agent名称');
             return;
         }
 
@@ -632,6 +753,13 @@ class SoulversePanel {
             return;
         }
 
+        // 显示加载状态
+        this.showLoading('正在分析回答...', 'AI正在从你的回答中提取兴趣、性格和社交目标，请稍候');
+        if (createBtn) {
+            createBtn.disabled = true;
+            createBtn.classList.add('loading');
+        }
+
         try {
             const response = await fetch('/api/create-agent-from-qa', {
                 method: 'POST',
@@ -644,7 +772,18 @@ class SoulversePanel {
                 })
             });
 
+            // 更新加载提示
+            this.showLoading('正在创建Agent...', '正在将提取的信息转换为Agent配置');
+
             const result = await response.json();
+            
+            // 隐藏加载状态
+            this.hideLoading();
+            if (createBtn) {
+                createBtn.disabled = false;
+                createBtn.classList.remove('loading');
+            }
+
             if (result.success) {
                 this.showSuccessMessage(`Agent创建成功！\n名称: ${result.agent_info.nickname}\n位置: ${result.agent_info.location}`);
                 // 清空输入
@@ -653,13 +792,29 @@ class SoulversePanel {
                 document.getElementById('qaSocialGoals').value = '';
                 // 关闭模态框
                 this.closeModal();
-                // 刷新Agent列表
-                this.updateAgentList();
+                
+                // 如果响应中包含角色列表，立即更新
+                if (result.characters && Array.isArray(result.characters)) {
+                    // 直接更新角色列表
+                    if (window.characterProfiles) {
+                        window.characterProfiles.updateCharacters(result.characters);
+                    }
+                    this.updateAgentListFromData(result.characters);
+                } else {
+                    // 否则通过WebSocket请求更新
+                    this.refreshCharacterList();
+                }
             } else {
                 alert('创建失败: ' + (result.message || '未知错误'));
             }
         } catch (error) {
             console.error('Error creating agent from QA:', error);
+            // 隐藏加载状态
+            this.hideLoading();
+            if (createBtn) {
+                createBtn.disabled = false;
+                createBtn.classList.remove('loading');
+            }
             alert('创建失败: ' + error.message);
         }
     }
@@ -695,18 +850,23 @@ class SoulversePanel {
                 // 关闭模态框
                 this.closeModal();
                 
-                // 自动刷新角色列表
-                this.updateAgentList();
+                // 如果响应中包含角色列表，立即更新
+                if (result.characters && Array.isArray(result.characters)) {
+                    // 直接更新角色列表
+                    if (window.characterProfiles) {
+                        window.characterProfiles.updateCharacters(result.characters);
+                    }
+                    this.updateAgentListFromData(result.characters);
+                } else {
+                    // 否则通过WebSocket请求更新
+                    this.refreshCharacterList();
+                }
                 
                 // 自动选择新创建的Agent
                 this.currentAgentCode = finalRoleCode;
-                if (document.getElementById('agentSelect')) {
-                    document.getElementById('agentSelect').value = finalRoleCode;
-                }
-                
-                // 刷新全局角色列表（触发其他面板更新）
-                if (window.requestCharacters) {
-                    window.requestCharacters();
+                const agentSelect = document.getElementById('agentSelect');
+                if (agentSelect) {
+                    agentSelect.value = finalRoleCode;
                 }
                 
                 // 触发角色列表更新事件
@@ -917,73 +1077,44 @@ class SoulversePanel {
         }
     }
 
-    updateAgentList() {
-        // 从角色列表更新Agent选择下拉框
-        const agentSelect = document.getElementById('agentSelect');
-        if (!agentSelect) return;
-
-        // 清空现有选项（除了第一个）
-        while (agentSelect.children.length > 1) {
-            agentSelect.removeChild(agentSelect.lastChild);
-        }
-
-        // 请求最新的角色列表
+    refreshCharacterList() {
+        // 统一的方法：刷新角色列表
+        // 通过WebSocket请求最新的角色列表
         if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+            // 发送请求
             window.ws.send(JSON.stringify({
                 type: 'request_characters'
             }));
+            console.log('已请求更新角色列表');
+        } else {
+            console.warn('WebSocket未连接，无法刷新角色列表');
+            // 如果WebSocket未连接，尝试直接使用REST API获取
+            this.fetchCharacterListFromAPI();
         }
+    }
 
-        // 监听角色列表更新
-        const updateFromList = (characters) => {
-            // 清空现有选项（除了第一个）
-            while (agentSelect.children.length > 1) {
-                agentSelect.removeChild(agentSelect.lastChild);
-            }
-            
-            // 如果没有Agent，显示提示
-            if (!characters || characters.length === 0) {
-                const option = document.createElement('option');
-                option.value = "";
-                option.textContent = "-- 请先创建Agent --";
-                option.disabled = true;
-                agentSelect.appendChild(option);
-                return;
-            }
-            
-            // 只显示用户创建的Agent（is_user_agent === true）
-            const userAgents = characters.filter(char => char.is_user_agent === true);
-            
-            if (userAgents.length === 0) {
-                const option = document.createElement('option');
-                option.value = "";
-                option.textContent = "-- 请先创建你的Agent --";
-                option.disabled = true;
-                agentSelect.appendChild(option);
-                return;
-            }
-            
-            userAgents.forEach(char => {
-                const option = document.createElement('option');
-                option.value = char.code || char.name || char.id;
-                option.textContent = char.name;
-                agentSelect.appendChild(option);
-            });
+    async fetchCharacterListFromAPI() {
+        // 备用方案：通过REST API获取角色列表（如果WebSocket不可用）
+        try {
+            // 注意：目前没有REST API端点，所以这个方法暂时不实现
+            // 如果未来需要，可以添加 /api/get-characters 端点
+            console.warn('WebSocket不可用，无法获取角色列表');
+        } catch (error) {
+            console.error('获取角色列表失败:', error);
+        }
+    }
 
-            if (window.characterProfiles) {
-                window.characterProfiles.updateCharacters(characters);
-            }
-        };
+    updateAgentList() {
+        // 从角色列表更新Agent选择下拉框
+        // 这个方法现在只负责更新UI，不主动请求数据
+        // 数据更新由refreshCharacterList()和WebSocket消息处理来完成
+        const agentSelect = document.getElementById('agentSelect');
+        if (!agentSelect) return;
 
-        // 监听WebSocket消息获取角色列表
-        const handler = (event) => {
-            const message = event.detail;
-            if (message.type === 'characters_list' && message.data.characters) {
-                updateFromList(message.data.characters);
-                window.removeEventListener('websocket-message', handler);
-            }
-        };
-        window.addEventListener('websocket-message', handler);
+        // 如果已有角色列表数据，直接更新
+        if (window.characterProfiles && window.characterProfiles.characters) {
+            this.updateAgentListFromData(window.characterProfiles.characters);
+        }
     }
 
     updateAgentListFromData(characters) {

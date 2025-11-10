@@ -1,6 +1,6 @@
 {
-    "role_llm_name": "deepseek-chat",
-    "world_llm_name": "deepseek-chat",
+    "role_llm_name": "gpt-4o",
+    "world_llm_name": "gpt-4o",
     "embedding_model_name":"bge-small",
     "preset_path":"./experiment_presets/soulverse_sandbox.json",
     "if_save": 0,
@@ -10,8 +10,8 @@
     "mode": "free",
     "enable_ai_match_analysis": 1,
 
-    "OPENAI_API_KEY":"",
-    "OPENAI_API_BASE":"",
+    "OPENAI_API_KEY":"sk-vHXUGR18hR83QnmI5eCa716e2c544868AcAf2b6012559bBd",
+    "OPENAI_API_BASE":"https://api.apiyi.com/v1",
     "GEMINI_API_KEY":"",
     "GEMINI_API_KEY_2":"",
     "DEEPSEEK_API_KEY":"sk-572fdd429a8b40eb8796fb0729182326",

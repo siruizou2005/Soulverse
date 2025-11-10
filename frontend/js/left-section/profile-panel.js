@@ -66,26 +66,26 @@ class CharacterProfiles {
             <div class="character-card" data-id="${character.id}" data-code="${character.code || ''}">
                 <div class="character-header">
                     <div class="character-name-section">
-                        <div class="character-name">${character.name}</div>
+                    <div class="character-name">${character.name}</div>
                         ${mbtiDisplay}
                     </div>
                 </div>
                 
                 ${character.description ? `
-                <div class="character-description">
-                    <span class="short-desc">${shortDesc}</span>
-                    ${needsExpand ? `
-                        <span class="full-desc" style="display: none;">${character.description}</span>
-                        <span class="expand-btn">展开</span>
-                    ` : ''}
-                </div>
+                    <div class="character-description">
+                        <span class="short-desc">${shortDesc}</span>
+                        ${needsExpand ? `
+                            <span class="full-desc" style="display: none;">${character.description}</span>
+                            <span class="expand-btn">展开</span>
+                        ` : ''}
+                    </div>
                 ` : ''}
                 
                 ${interestsDisplay}
                 ${traitsDisplay}
                 ${socialGoalsDisplay}
                 
-                <div class="character-details">
+                    <div class="character-details">
                     <div class="detail-item">
                         <i class="fas fa-map-marker-alt"></i>
                         <span>${character.location || '未知位置'}</span>
@@ -236,10 +236,10 @@ class CharacterProfiles {
             this.characters = [];
             this.renderCharacters([]);
             return;
-        }
-        this.characters = charactersData;
-        this.allCharacters = [...charactersData];
-        this.renderCharacters(this.characters);
+            }
+            this.characters = charactersData;
+            this.allCharacters = [...charactersData];
+            this.renderCharacters(this.characters);
     }
     renderCharacters(characters) {
         const container = document.querySelector('.profiles-container');
@@ -259,9 +259,46 @@ class CharacterProfiles {
                 return;
             }
             
+            // 获取当前选中的角色代码
+            const selectedRoleName = window.selectedRoleName || null;
+            let selectedCharacter = null;
+            const otherCharacters = [];
+            
+            // 分离选中的角色和其他角色
             characters.forEach(character => {
+                const characterName = character.name || character.nickname || '';
+                const characterCode = character.code || character.role_code || '';
+                
+                // 匹配选中的角色（通过名称或代码）
+                if (selectedRoleName && (
+                    String(characterName) === String(selectedRoleName) ||
+                    String(characterCode) === String(selectedRoleName) ||
+                    String(character.name) === String(selectedRoleName) ||
+                    String(character.nickname) === String(selectedRoleName)
+                )) {
+                    selectedCharacter = character;
+                } else {
+                    otherCharacters.push(character);
+                }
+            });
+            
+            // 先渲染选中的角色（如果有），然后渲染其他角色
+            if (selectedCharacter) {
+                const selectedCard = this.createCharacterCard(selectedCharacter);
+                container.innerHTML += selectedCard;
+            }
+            
+            otherCharacters.forEach(character => {
                 container.innerHTML += this.createCharacterCard(character);
             });
+            
+            // 为选中的卡片添加样式类
+            if (selectedCharacter) {
+                const firstCard = container.querySelector('.character-card');
+                if (firstCard) {
+                    firstCard.classList.add('is-selected');
+                }
+            }
         }
     }
 
@@ -305,14 +342,12 @@ class CharacterProfiles {
         // 基本信息
         const nameEl = modal.querySelector('.modal-name');
         const descEl = modal.querySelector('.modal-description');
-        const avatarEl = modal.querySelector('.modal-avatar');
         const locEl = modal.querySelector('.modal-location');
         const goalEl = modal.querySelector('.modal-goal');
         const stateEl = modal.querySelector('.modal-state');
 
         nameEl.textContent = character.name || character.nickname || character.id || 'Unknown';
         descEl.textContent = character.description || character.brief || character.personality || '';
-        avatarEl.src = character.icon || './frontend/assets/images/default-icon.jpg';
         locEl.textContent = character.location || '—';
         goalEl.textContent = character.goal || '—';
         stateEl.textContent = character.state || character.status || '—';

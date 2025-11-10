@@ -123,7 +123,7 @@ class SocialStoryGenerator:
         for record in records:
             virtual_time = record.get("virtual_time", "")
             detail = record.get("detail", "")
-            act_type = record.get("act_type", "")
+            act_type = record.get("act_type", record.get("type", ""))
             
             # 根据活动类型格式化
             if act_type == "plan":
@@ -152,32 +152,46 @@ class SocialStoryGenerator:
         """
         key_events = []
         
+        # 排除的记录类型（这些不应该作为关键事件）
+        excluded_types = ["user_input_placeholder", "plan", "npc", "enviroment"]
+        
         for record in records:
-            act_type = record.get("act_type", "")
+            act_type = record.get("act_type", record.get("type", ""))
+            
+            # 跳过排除的类型
+            if act_type in excluded_types:
+                continue
             
             # 识别关键事件类型
             if act_type in ["single", "multi"]:
                 # 社交互动
-                key_events.append({
-                    "type": "interaction",
-                    "time": record.get("virtual_time", ""),
-                    "detail": record.get("detail", ""),
-                    "participants": record.get("group", [])
-                })
+                detail = record.get("detail", "")
+                # 排除占位符
+                if detail and detail != "__USER_INPUT_PLACEHOLDER__":
+                    key_events.append({
+                        "type": "interaction",
+                        "time": record.get("virtual_time", ""),
+                        "detail": detail,
+                        "participants": record.get("group", [])
+                    })
             elif act_type == "move":
                 # 位置移动
-                key_events.append({
-                    "type": "movement",
-                    "time": record.get("virtual_time", ""),
-                    "detail": record.get("detail", "")
-                })
+                detail = record.get("detail", "")
+                if detail:
+                    key_events.append({
+                        "type": "movement",
+                        "time": record.get("virtual_time", ""),
+                        "detail": detail
+                    })
             elif act_type == "goal setting":
                 # 目标设定
-                key_events.append({
-                    "type": "goal",
-                    "time": record.get("virtual_time", ""),
-                    "detail": record.get("detail", "")
-                })
+                detail = record.get("detail", "")
+                if detail:
+                    key_events.append({
+                        "type": "goal",
+                        "time": record.get("virtual_time", ""),
+                        "detail": detail
+                    })
         
         return key_events
     
@@ -199,16 +213,24 @@ class SocialStoryGenerator:
             "interaction_types": {}
         }
         
+        # 排除的记录类型（这些不应该被统计为互动或移动）
+        excluded_types = ["user_input_placeholder", "user_input", "goal setting", "plan", "npc", "enviroment"]
+        
         for record in records:
-            act_type = record.get("act_type", "")
+            act_type = record.get("act_type", record.get("type", ""))
+            
+            # 跳过排除的类型
+            if act_type in excluded_types:
+                continue
             
             if act_type in ["single", "multi"]:
                 stats["total_interactions"] += 1
                 # 记录互动对象
                 group = record.get("group", [])
-                for member in group:
-                    if member != agent_code:
-                        stats["unique_contacts"].add(member)
+                if group:  # 确保group不为空
+                    for member in group:
+                        if member and member != agent_code:  # 确保member不为空且不是自己
+                            stats["unique_contacts"].add(member)
                 
                 # 统计互动类型
                 if act_type not in stats["interaction_types"]:
