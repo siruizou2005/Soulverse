@@ -2,7 +2,7 @@
     "role_llm_name": "gemini-2.5-flash",
     "world_llm_name": "gemini-2.5-flash",
     "embedding_model_name":"bge-small",
-    "preset_path":"./experiment_presets/experiment_icefire.json",
+    "preset_path":"./experiment_presets/soulverse_sandbox.json",
     "if_save": 0,
     "scene_mode": 1,
     "rounds": 10,
