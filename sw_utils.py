@@ -342,7 +342,8 @@ def count_tokens_num(string, encoding_name = "cl100k_base"):
     return num_tokens
 
  
-def json_parser(output):
+def json_parser(output: str):
+    """Parse JSON from text output."""
     output = output.replace("\n", "")
     output = output.replace("\t", "")
     if "{" not in output:
@@ -377,6 +378,56 @@ def conceal_thoughts(detail):
     text = re.sub(r'【.*?】', '', detail)
     text = re.sub(r'\[.*?\]', '', text)
     return text
+
+def remove_markdown(text: str) -> str:
+    """
+    移除文本中的 Markdown 格式标记。
+    
+    Args:
+        text: 需要清理的文本
+        
+    Returns:
+        清理后的纯文本
+    """
+    if not text:
+        return text
+    
+    # 移除代码块标记
+    text = re.sub(r'```[\w]*\n?', '', text)
+    text = re.sub(r'```', '', text)
+    
+    # 移除行内代码标记
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    
+    # 移除粗体和斜体标记
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **粗体**
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)  # *斜体*
+    text = re.sub(r'__([^_]+)__', r'\1', text)  # __粗体__
+    text = re.sub(r'_([^_]+)_', r'\1', text)  # _斜体_
+    
+    # 移除标题标记
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+    
+    # 移除链接标记 [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    
+    # 移除图片标记 ![alt](url) -> alt
+    text = re.sub(r'!\[([^\]]*)\]\([^\)]+\)', r'\1', text)
+    
+    # 移除列表标记
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    
+    # 移除引用标记
+    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+    
+    # 移除水平线
+    text = re.sub(r'^[-*_]{3,}$', '', text, flags=re.MULTILINE)
+    
+    # 清理多余的空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
 
 def extract_first_number(text):
     match = re.search(r'\b\d+(?:\.\d+)?\b', text)
@@ -487,6 +538,7 @@ def is_image(filepath):
     return False
 
 def clean_collection_name(name: str) -> str:
+    """Clean collection name for database."""
     cleaned_name = name.replace(' ', '_')
     cleaned_name = cleaned_name.replace('.', '_')
     if not all(ord(c) < 128 for c in cleaned_name):
