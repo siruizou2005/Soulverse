@@ -1,14 +1,17 @@
 """
 用户Agent类
 基于Soul兴趣图谱创建的用户Agent，继承Performer的核心功能
+支持新的三层人格模型
 """
 import os
 import sys
 sys.path.append("../")
 from typing import Any, Dict, List, Optional
 from modules.main_performer import Performer
-from modules.soul_api_mock import get_soul_profile
+from modules.soul_api_mock import get_soul_profile, get_personality_profile
 from modules.soulverse_mode import SoulverseMode
+from modules.personality_model import PersonalityProfile
+from modules.style_vector_db import StyleVectorDB
 from sw_utils import *
 
 
@@ -23,6 +26,8 @@ class UserAgent(Performer):
                  role_code: str,
                  world_file_path: str,
                  soul_profile: Optional[Dict[str, Any]] = None,
+                 personality_profile: Optional[PersonalityProfile] = None,
+                 chat_history: Optional[List[str]] = None,
                  language: str = "zh",
                  db_type: str = "chroma",
                  llm_name: str = "gpt-4o-mini",
@@ -36,7 +41,9 @@ class UserAgent(Performer):
             user_id: 用户ID
             role_code: Agent的角色代码（唯一标识）
             world_file_path: 世界设定文件路径
-            soul_profile: Soul用户画像数据（如果为None，则从模拟API获取）
+            soul_profile: Soul用户画像数据（旧版，如果为None且personality_profile也为None，则从模拟API获取）
+            personality_profile: 三层人格模型数据（新版，优先使用）
+            chat_history: 聊天记录（可选，用于提取语言风格）
             language: 语言设置
             db_type: 数据库类型
             llm_name: LLM模型名称
@@ -44,20 +51,55 @@ class UserAgent(Performer):
             embedding_name: 嵌入模型名称
             embedding: 嵌入模型实例（可选）
         """
-        # 获取或生成Soul用户画像
-        if soul_profile is None:
-            soul_profile = get_soul_profile(user_id=user_id)
+        # 获取或生成PersonalityProfile
+        if personality_profile is None:
+            if soul_profile is None:
+                # 使用新版API生成三层人格模型
+                personality_profile = get_personality_profile(user_id=user_id)
+                soul_profile = {"interests": personality_profile.interests,
+                              "mbti": personality_profile.core_traits.mbti,
+                              "social_goals": personality_profile.social_goals,
+                              "long_term_goals": personality_profile.long_term_goals}
+            else:
+                # 从旧版soul_profile转换（简化处理）
+                from modules.soul_api_mock import SoulProfileMock
+                personality_profile = SoulProfileMock.get_personality_profile(
+                    user_id=user_id,
+                    interests=soul_profile.get("interests"),
+                    mbti=soul_profile.get("mbti")
+                )
         
         self.user_id = user_id
-        self.soul_profile = soul_profile
+        self.soul_profile = soul_profile  # 保留旧版数据以兼容
+        self.personality_profile = personality_profile  # 新版三层人格模型
         self.is_user_agent = True  # 标记为用户Agent
         self.soulverse_mode = SoulverseMode(language=language)  # Soulverse模式
         
-        # 从Soul画像生成Agent的profile
-        agent_profile = self._generate_agent_profile_from_soul(soul_profile)
+        # 初始化语言风格向量数据库
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        style_db_name = f"style_{role_code}_{embedding_name}"
+        self.style_vector_db = StyleVectorDB(
+            db_name=style_db_name,
+            embedding_name=embedding_name,
+            db_type=db_type,
+            language=language
+        )
+        
+        # 如果有聊天记录，添加到风格向量数据库
+        if chat_history:
+            self.style_vector_db.add_utterances_batch([
+                {"text": text, "context": ""} for text in chat_history
+            ])
+            # 更新Few-Shot样本
+            self.personality_profile.style_examples = self.style_vector_db.extract_few_shot_examples(
+                num_examples=5
+            )
+        
+        # 从PersonalityProfile生成Agent的profile文本（用于向后兼容）
+        agent_profile = personality_profile.to_profile_text()
         
         # 创建临时角色信息文件
-        role_info = self._create_role_info(role_code, agent_profile, soul_profile)
+        role_info = self._create_role_info(role_code, agent_profile, personality_profile)
         
         # 创建临时目录存储角色信息
         temp_role_dir = self._create_temp_role_dir(role_code, role_info)
@@ -76,54 +118,20 @@ class UserAgent(Performer):
             embedding=embedding
         )
         
-        # 设置长期目标（基于Soul画像）
-        self.long_term_goals = soul_profile.get("long_term_goals", [])
+        # 设置长期目标（基于PersonalityProfile）
+        self.long_term_goals = personality_profile.long_term_goals
         
         # 设置初始motivation（基于社交目标）
-        if soul_profile.get("social_goals"):
-            self.initial_social_goals = soul_profile["social_goals"]
-        else:
-            self.initial_social_goals = []
+        self.initial_social_goals = personality_profile.social_goals
     
-    def _generate_agent_profile_from_soul(self, soul_profile: Dict[str, Any]) -> str:
+    def _create_role_info(self, role_code: str, profile: str, personality_profile: PersonalityProfile) -> Dict[str, Any]:
         """
-        从Soul用户画像生成Agent的profile描述
-        
-        Args:
-            soul_profile: Soul用户画像数据
-        
-        Returns:
-            Agent的profile字符串
-        """
-        interests = ", ".join(soul_profile.get("interests", []))
-        mbti = soul_profile.get("mbti", "未知")
-        personality = soul_profile.get("personality", "")
-        traits = ", ".join(soul_profile.get("traits", []))
-        social_goals = ", ".join(soul_profile.get("social_goals", []))
-        
-        profile = f"""这是一个基于用户真实画像创建的AI Agent。
-
-基本信息：
-- MBTI类型：{mbti}
-- 性格特征：{personality}
-- 性格标签：{traits}
-
-兴趣标签：{interests}
-
-社交目标：{social_goals}
-
-这个Agent在虚拟世界中会根据自己的兴趣和性格自主行动，寻找志同道合的朋友，建立真实的社交关系。"""
-        
-        return profile
-    
-    def _create_role_info(self, role_code: str, profile: str, soul_profile: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        创建角色信息字典
+        创建角色信息字典（使用新的三层人格模型）
         
         Args:
             role_code: 角色代码
-            profile: Agent profile
-            soul_profile: Soul用户画像
+            profile: Agent profile文本（向后兼容）
+            personality_profile: 三层人格模型数据
         
         Returns:
             角色信息字典
@@ -146,8 +154,11 @@ class UserAgent(Performer):
             "nickname": nickname,
             "original_user_id": self.user_id,
             "source": "soulverse_user",
-            "activity": soul_profile.get("activity_level", 1.0),
-            "profile": profile,
+            "activity": 1.0,  # 默认活跃度
+            "profile": profile,  # 保留文本profile以兼容旧代码
+            "personality_profile": personality_profile.to_dict(),  # 新版结构化数据
+            "style_examples": personality_profile.style_examples,  # Few-Shot样本
+            "style_vector_db_name": self.style_vector_db.db_name,  # 风格向量库名称
             "relation": {},  # 初始没有关系
             "motivation": ""  # 将在set_motivation时生成
         }

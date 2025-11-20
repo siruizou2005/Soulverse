@@ -46,7 +46,7 @@ class Server():
         self.config: Dict = config
         self.experiment_name: str = os.path.basename(preset_path).replace(".json","") + "/" + config["experiment_subname"] + "_" + role_llm_name
         
-        performer_codes: List[str] = config['performer_codes']
+        performer_codes: List[str] = config.get('performer_codes', [])
         world_file_path: str = config["world_file_path"]
         map_file_path: str = config["map_file_path"] if "map_file_path" in config else ""
         role_file_dir: str = config["role_file_dir"] if "role_file_dir" in config else "./data/roles/"
@@ -57,10 +57,9 @@ class Server():
         self.language: str = config["language"] if "language" in config else "zh"
         self.source:str = config["source"] if "source" in config else ""
         
-        # 检测是否为Soulverse模式
-        self.is_soulverse_mode = (self.source == "soulverse" or 
-                                  "soulverse" in self.source.lower() or
-                                  len(config.get('performer_codes', [])) == 0)  # 空角色列表表示Soulverse模式
+        # 强制使用Soulverse模式：不再支持传统Performer
+        # 所有Agent必须通过add_user_agent()或add_npc_agent()动态添加
+        self.is_soulverse_mode = True
         
         self.idx: int = 0
         self.cur_round: int = 0
@@ -70,7 +69,7 @@ class Server():
         self.start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.current_status = {
             "location_code":"",
-            "group":performer_codes,
+            "group":[],  # Soulverse模式：初始为空，Agent动态添加后更新
         }
         self.scene_characters = {}
         self.event_history = []
@@ -82,11 +81,16 @@ class Server():
         self.logger = get_logger(self.experiment_name)
         
         self.embedding = get_embedding_model(embedding_name, language=self.language)
-        self.init_performers(performer_codes = performer_codes,
-                            role_file_dir = role_file_dir,
-                            world_file_path=world_file_path,
-                            llm = self.role_llm,
-                            embedding = self.embedding)
+        
+        # Soulverse模式：不初始化传统Performer，Agent通过API动态添加
+        # 初始化空的角色列表和performers字典
+        self.role_codes: List[str] = []
+        self.performers: Dict[str, Performer] = {}
+        
+        # 如果配置中有performer_codes，记录警告但不创建
+        if performer_codes:
+            self.logger.warning(f"检测到performer_codes配置，但Soulverse模式不支持传统Performer。"
+                              f"请使用add_user_agent()或add_npc_agent()API动态添加Agent。")
         
         if world_llm_name == role_llm_name:
             self.world_llm = self.role_llm
@@ -108,24 +112,18 @@ class Server():
                          world_file_path:str,
                          llm=None,
                          embedding=None) -> None:
-        self.role_codes: List[str] = performer_codes
-        self.performers: Dict[str, Performer] = {}
+        """
+        初始化角色列表（已废弃）
         
-        for role_code in performer_codes:
-            if check_role_code_availability(role_code,role_file_dir):
-                self.performers[role_code] = Performer(role_code=role_code, 
-                                                      role_file_dir=role_file_dir,
-                                                      world_file_path=world_file_path,
-                                                      source = self.source, 
-                                                      language=self.language,
-                                                      llm_name = self.role_llm_name,
-                                                      llm = llm,
-                                                      embedding_name=self.embedding_name,
-                                                      embedding = embedding
-                                                      )
-                # print(f"{role_code} Initialized.")
-            else:
-                print(f"Warning: The specified role `{role_code}` does not exist.")
+        注意：此方法已废弃。系统现在强制使用Soulverse模式，不再支持传统Performer。
+        所有Agent必须通过add_user_agent()或add_npc_agent()动态添加。
+        
+        保留此方法仅为了向后兼容，但不会执行任何操作。
+        """
+        # 已废弃：不再创建传统Performer
+        # 所有Agent必须通过add_user_agent()或add_npc_agent()动态添加
+        self.logger.warning("init_performers()已废弃。请使用add_user_agent()或add_npc_agent()动态添加Agent。")
+        return
     
     def init_orchestrator_from_file(self, 
                                    world_file_path: str, 
@@ -271,15 +269,17 @@ class Server():
     def add_npc_agent(self,
                      role_code: str,
                      role_name: str,
-                     preset_config: Dict[str, Any],
+                     preset_config: Optional[Dict[str, Any]] = None,
+                     preset_id: Optional[str] = None,
                      initial_location: Optional[str] = None):
         """
-        动态添加NPC Agent到沙盒
+        动态添加NPC Agent到沙盒（使用新的三层人格模型）
         
         Args:
             role_code: Agent的角色代码（唯一标识）
             role_name: Agent的名称
-            preset_config: 预设配置字典，包含兴趣、MBTI、性格、社交目标等
+            preset_config: 预设配置字典（旧版，如果preset_id为None则使用）
+            preset_id: 预设ID（新版，优先使用）
             initial_location: 初始位置代码（如果为None，随机分配）
         
         Returns:
@@ -289,12 +289,13 @@ class Server():
         if role_code in self.role_codes:
             raise ValueError(f"Agent with role_code {role_code} already exists")
         
-        # 创建NPCAgent
+        # 创建NPCAgent（使用新的三层人格模型）
         npc_agent = NPCAgent(
             role_code=role_code,
             role_name=role_name,
             world_file_path=self.config.get("world_file_path", ""),
             preset_config=preset_config,
+            preset_id=preset_id,
             language=self.language,
             db_type="chroma",
             llm_name=self.role_llm_name,
@@ -324,13 +325,18 @@ class Server():
         self.role_codes.append(role_code)
         self.performers[role_code] = npc_agent
         
-        # 设置初始motivation
-        motivation = npc_agent.set_motivation(
-            world_description=self.orchestrator.description,
-            other_roles_info=self._get_group_members_info_dict(self.performers),
-            intervention=self.event,
-            script=self.script
-        )
+        # 设置初始motivation（仅当motivation为空时才调用LLM）
+        # 如果Agent已经有motivation（从预设模板加载），则跳过
+        if not npc_agent.motivation or npc_agent.motivation.strip() == "":
+            motivation = npc_agent.set_motivation(
+                world_description=self.orchestrator.description,
+                other_roles_info=self._get_group_members_info_dict(self.performers),
+                intervention=self.event,
+                script=self.script
+            )
+            self.log(f"NPC Agent {npc_agent.nickname} ({role_code}) 已生成motivation")
+        else:
+            self.log(f"NPC Agent {npc_agent.nickname} ({role_code}) 使用预设motivation")
         
         self.log(f"NPC Agent {npc_agent.nickname} ({role_code}) 已加入沙盒，初始位置: {npc_agent.location_name}")
         
@@ -541,6 +547,36 @@ class Server():
         )
         
         info_text = plan["detail"]
+        
+        # 处理detail字段：如果API返回的是列表格式，需要转换为字符串
+        if isinstance(info_text, list):
+            # 将列表格式的detail转换为字符串
+            detail_parts = []
+            for item in info_text:
+                if isinstance(item, dict):
+                    if "thought" in item:
+                        detail_parts.append(f"【{item['thought']}】")
+                    if "speech" in item:
+                        detail_parts.append(f"「{item['speech']}」")
+                    if "action" in item:
+                        detail_parts.append(f"（{item['action']}）")
+                elif isinstance(item, str):
+                    detail_parts.append(item)
+            info_text = " ".join(detail_parts)
+            plan["detail"] = info_text  # 更新plan中的detail为字符串格式
+        
+        # 确保info_text是字符串
+        if not isinstance(info_text, str):
+            info_text = str(info_text)
+            plan["detail"] = info_text
+        
+        # 确保target_role_codes是列表格式
+        if "target_role_codes" not in plan or plan["target_role_codes"] is None:
+            plan["target_role_codes"] = []
+        elif not isinstance(plan["target_role_codes"], list):
+            # 如果是字符串或其他类型，转换为列表
+            plan["target_role_codes"] = [plan["target_role_codes"]]
+        
         if plan["target_role_codes"]:
             plan["target_role_codes"] = self._name2code(plan["target_role_codes"])
             

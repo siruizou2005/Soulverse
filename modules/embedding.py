@@ -10,6 +10,9 @@ import hashlib
 import random
 from typing import Iterable, List
 
+# 全局缓存：避免重复加载相同的embedding模型
+_embedding_model_cache = {}
+
 
 class EmbeddingModel(EmbeddingFunction[Documents]):
     def __init__(self, model_name, language='en'):
@@ -93,6 +96,23 @@ class OpenAIEmbedding(EmbeddingFunction[Documents]):
             return [self.client.embeddings.create(input=[sentence.replace("\n", " ")], model=self.model_name).data[0].embedding for sentence in input]
 
 def get_embedding_model(embed_name, language='en'):
+    """
+    获取embedding模型实例（带缓存机制，避免重复加载）
+    
+    Args:
+        embed_name: 模型名称
+        language: 语言设置
+        
+    Returns:
+        EmbeddingModel或OpenAIEmbedding实例
+    """
+    # 创建缓存键
+    cache_key = f"{embed_name}_{language}"
+    
+    # 如果缓存中存在，直接返回缓存的实例
+    if cache_key in _embedding_model_cache:
+        return _embedding_model_cache[cache_key]
+    
     local_model_dict = {
         "bge-m3":"BAAI/bge-m3",
         "bge-large": f"BAAI/bge-large-{language}",
@@ -107,12 +127,20 @@ def get_embedding_model(embed_name, language='en'):
              "api_key_field":"OPENAI_API_KEY"},
 
     }
+    
+    # 创建模型实例
     if embed_name in local_model_dict:
         model_name = local_model_dict[embed_name]
-        return EmbeddingModel(model_name, language=language)
-    if embed_name in online_model_dict:
+        embedding = EmbeddingModel(model_name, language=language)
+    elif embed_name in online_model_dict:
         model_name = online_model_dict[embed_name]["model_name"]
         api_key_field = online_model_dict[embed_name]["api_key_field"]
         base_url = online_model_dict[embed_name]["url"]
-        return OpenAIEmbedding(model_name=model_name, base_url=base_url,api_key_field=api_key_field)
-    return EmbeddingModel(embed_name, language=language)
+        embedding = OpenAIEmbedding(model_name=model_name, base_url=base_url, api_key_field=api_key_field)
+    else:
+        embedding = EmbeddingModel(embed_name, language=language)
+    
+    # 缓存模型实例
+    _embedding_model_cache[cache_key] = embedding
+    
+    return embedding

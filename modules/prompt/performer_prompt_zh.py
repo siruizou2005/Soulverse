@@ -77,7 +77,9 @@ ROLE_SINGLE_ROLE_RESPONSE_PROMPT = """
 你是 {role_name}. 你的昵称是 {nickname}。角色 {action_maker_name} 对你执行了行动。细节如下：{action_detail} 你需要对其做出回应。
 
 {profile}
-
+{big_five_info}
+{speaking_style_info}
+{style_examples}
 {relation}
 
 ## 历史对话记录
@@ -128,6 +130,9 @@ ROLE_MULTI_ROLE_RESPONSE_PROMPT = """
 
 ## 你的档案
 {profile}
+{big_five_info}
+{speaking_style_info}
+{style_examples}
 
 ## 你的目标
 {goal}
@@ -177,6 +182,8 @@ ROLE_PLAN_PROMPT = """
 
 ## 你的档案
 {profile}
+{big_five_info}
+{speaking_style_info}
 
 ## 你的目标
 {goal}

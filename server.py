@@ -66,14 +66,15 @@ class ConnectionManager:
                     role_llm_name = config["role_llm_name"],
                     embedding_name = config["embedding_model_name"])
             
-            # Soulverse模式：使用更大的rounds值支持持续运行
-            rounds = config.get("rounds", 100) if self.scrollweaver.server.is_soulverse_mode else config.get("rounds", 10)
-            
-            self.scrollweaver.set_generator(rounds = rounds, 
-                        save_dir = config.get("save_dir", ""), 
-                        if_save = config.get("if_save", 0),
-                        mode = "free",  # Soulverse模式强制使用free模式
-                        scene_mode = config.get("scene_mode", 1),)
+            # 保存配置参数，延迟初始化生成器
+            self.generator_config = {
+                "rounds": config.get("rounds", 100) if self.scrollweaver.server.is_soulverse_mode else config.get("rounds", 10),
+                "save_dir": config.get("save_dir", ""),
+                "if_save": config.get("if_save", 0),
+                "mode": "free",  # Soulverse模式强制使用free模式
+                "scene_mode": config.get("scene_mode", 1),
+            }
+            self.generator_initialized = False
             
             # Soulverse模式不再自动创建预设Agent，用户需要自己创建
             # if self.scrollweaver.server.is_soulverse_mode:
@@ -171,6 +172,14 @@ class ConnectionManager:
     async def generate_story(self, client_id: str):
         """持续生成故事的协程"""
         try:
+            # 检查是否有角色，如果没有角色就不启动生成
+            if len(self.scrollweaver.server.role_codes) == 0:
+                await self.active_connections[client_id].send_json({
+                    'type': 'error',
+                    'data': {'message': '没有角色，无法生成故事。请先创建Agent。'}
+                })
+                return
+            
             while True:
                 if client_id in self.active_connections:
                     # 获取用户选择的角色（如果用户选择了角色，用于后续检查）
@@ -193,12 +202,19 @@ class ConnectionManager:
                     # 注意：在Goal Setting阶段，用户角色的消息不会yield，所以不会触发用户输入
                     message,status = await self.get_next_message()
                     
-                    # 检查生成器是否已结束
+                    # 检查生成器是否已结束或没有角色
                     if message is None:
-                        await self.active_connections[client_id].send_json({
-                            'type': 'story_ended',
-                            'data': {'message': '故事已结束'}
-                        })
+                        # 检查是否因为没有角色而返回None
+                        if len(self.scrollweaver.server.role_codes) == 0:
+                            await self.active_connections[client_id].send_json({
+                                'type': 'error',
+                                'data': {'message': '没有角色，无法生成故事。请先创建Agent。'}
+                            })
+                        else:
+                            await self.active_connections[client_id].send_json({
+                                'type': 'story_ended',
+                                'data': {'message': '故事已结束'}
+                            })
                         break
                     
                     # 检查是否轮到用户选择的角色（观察者模式或灵魂降临模式）
@@ -357,17 +373,68 @@ class ConnectionManager:
             'history_messages':self.scrollweaver.get_history_messages(save_dir = config["save_dir"]),
         }
     
+    def _ensure_generator_initialized(self):
+        """确保生成器已初始化（延迟初始化）"""
+        if not self.generator_initialized:
+            # 检查是否有角色，如果没有角色就不初始化生成器
+            if len(self.scrollweaver.server.role_codes) == 0:
+                return False
+            
+            # 初始化生成器
+            self.scrollweaver.set_generator(
+                rounds=self.generator_config["rounds"],
+                save_dir=self.generator_config["save_dir"],
+                if_save=self.generator_config["if_save"],
+                mode=self.generator_config["mode"],
+                scene_mode=self.generator_config["scene_mode"]
+            )
+            self.generator_initialized = True
+            return True
+        return True
+    
     async def get_next_message(self):
         """从ScrollWeaver获取下一条消息"""
-        try:
-            message = self.scrollweaver.generate_next_message()
-        except StopIteration:
-            # 生成器已结束
+        # 确保生成器已初始化
+        if not self._ensure_generator_initialized():
+            # 没有角色，返回None表示无法生成消息
             return None, None
-        if not os.path.exists(message["icon"]) or not is_image(message["icon"]):
-            message["icon"] = default_icon_path
-        status = self.scrollweaver.get_current_status()
-        return message,status
+        
+        # 循环直到获取到有效消息
+        max_attempts = 10  # 最多尝试10次
+        attempts = 0
+        
+        while attempts < max_attempts:
+            try:
+                message = self.scrollweaver.generate_next_message()
+            except StopIteration:
+                # 生成器已结束
+                return None, None
+            except AttributeError as e:
+                # 生成器未初始化
+                if "generator" in str(e):
+                    return None, None
+                raise
+            
+            if message is None:
+                attempts += 1
+                continue
+            
+            # 过滤无效消息
+            text = message.get("text", "").strip()
+            if not text or text == "__USER_INPUT_PLACEHOLDER__":
+                # 跳过占位消息和空消息，继续获取下一条
+                attempts += 1
+                continue
+            
+            # 检查图标路径
+            if not os.path.exists(message.get("icon", "")) or not is_image(message.get("icon", "")):
+                message["icon"] = default_icon_path
+            
+            status = self.scrollweaver.get_current_status()
+            return message, status
+        
+        # 如果尝试多次仍未获取到有效消息，返回None
+        return None, None
     
     def _get_role_code_by_name(self, role_name: str) -> str:
         """通过角色名称找到角色代码（支持role_name和nickname匹配）"""
@@ -887,6 +954,9 @@ async def create_user_agent(request: Request):
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
         
+        # 重置生成器初始化标志，下次调用时会重新初始化
+        manager.generator_initialized = False
+        
         # 获取最新的角色列表（包含新创建的Agent）
         characters_info = manager.scrollweaver.get_characters_info()
         
@@ -942,6 +1012,9 @@ async def create_agent_from_text(request: Request):
         
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
+        
+        # 重置生成器初始化标志，下次调用时会重新初始化
+        manager.generator_initialized = False
         
         # 获取最新的角色列表（包含新创建的Agent）
         characters_info = manager.scrollweaver.get_characters_info()
@@ -1001,6 +1074,9 @@ async def create_agent_from_file(
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
         
+        # 重置生成器初始化标志，下次调用时会重新初始化
+        manager.generator_initialized = False
+        
         # 获取最新的角色列表（包含新创建的Agent）
         characters_info = manager.scrollweaver.get_characters_info()
         
@@ -1054,6 +1130,9 @@ async def create_agent_from_qa(request: Request):
         
         # 记录用户Agent映射
         manager.user_agents[user_id] = role_code
+        
+        # 重置生成器初始化标志，下次调用时会重新初始化
+        manager.generator_initialized = False
         
         # 获取最新的角色列表（包含新创建的Agent）
         characters_info = manager.scrollweaver.get_characters_info()
@@ -1138,12 +1217,15 @@ async def add_preset_npc(request: Request):
         if not role_code:
             role_code = f"npc_{preset_id}_{int(datetime.now().timestamp())}"
         
-        # 创建NPC Agent（不是用户Agent）
+        # 创建NPC Agent（使用新的三层人格模型）
         npc_agent = manager.scrollweaver.server.add_npc_agent(
             role_code=role_code,
             role_name=role_name,
-            preset_config=preset_template
+            preset_id=preset_id  # 使用preset_id而不是preset_config
         )
+        
+        # 重置生成器初始化标志，下次调用时会重新初始化
+        manager.generator_initialized = False
         
         return {
             "success": True,

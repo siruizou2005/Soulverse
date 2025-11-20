@@ -85,6 +85,9 @@ Action details are as follows: {action_detail}
 
 ## Your profile
 {profile}
+{big_five_info}
+{speaking_style_info}
+{style_examples}
 {relation}
 
 ## Your goal
@@ -137,6 +140,9 @@ The action details are as follows: {action_detail}
 
 ## Your profile
 {profile}
+{big_five_info}
+{speaking_style_info}
+{style_examples}
 
 ## Your goal
 {goal}
@@ -188,6 +194,8 @@ You are {role_name}. Your nickname is {nickname}. Based on your goal and other p
 
 ## Your profile
 {profile}
+{big_five_info}
+{speaking_style_info}
 {world_description}
 
 ## Your goal

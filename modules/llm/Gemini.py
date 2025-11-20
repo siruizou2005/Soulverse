@@ -17,6 +17,7 @@ class Gemini(BaseLLM):
     - gemini-1.5-flash
     - gemini-1.5-pro
     - gemini-2.5-flash
+    - gemini-2.5-flash-lite
     - gemini-2.5-pro
     """
     
@@ -181,7 +182,33 @@ class Gemini(BaseLLM):
                 api_key = self._get_next_api_key()
                 self._configure_client(api_key)
 
-                print(f"[Gemini] 开始 API 调用（尝试 {attempt + 1}/{self.max_retries}），模型: {self.display_model_name}，超时: {self.timeout}秒")
+                # 获取 API Base URL
+                # Google genai 库默认使用官方 API，但如果配置了 GEMINI_API_BASE，可能通过环境变量传递
+                gemini_api_base = os.getenv("GEMINI_API_BASE", "")
+                if gemini_api_base:
+                    api_base = gemini_api_base
+                else:
+                    # Google Gemini 官方 API 端点
+                    api_base = "https://generativelanguage.googleapis.com/v1beta"
+                
+                print(f"[Gemini] 开始 API 调用（尝试 {attempt + 1}/{self.max_retries}）")
+                print(f"[Gemini] 实际调用模型: {self.model_name}")
+                if self.display_model_name != self.model_name:
+                    print(f"[Gemini] 显示名称: {self.display_model_name}")
+                print(f"[Gemini] Base URL: {api_base}")
+                print(f"[Gemini] 超时: {self.timeout}秒")
+                
+                # 打印请求内容
+                print(f"[Gemini] === 请求内容 ===")
+                if self.system_instruction:
+                    print(f"[Gemini] System Instruction: {self.system_instruction[:200]}..." if len(self.system_instruction) > 200 else f"[Gemini] System Instruction: {self.system_instruction}")
+                print(f"[Gemini] 消息数量: {len(self.messages)}")
+                for i, msg in enumerate(self.messages):
+                    content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+                    print(f"[Gemini] 消息 {i+1} ({msg['role']}): {content_preview}")
+                print(f"[Gemini] Temperature: {temperature}")
+                print(f"[Gemini] =================")
+                
                 # 创建模型实例，如果有 system_instruction 则传入
                 if self.system_instruction:
                     model = genai.GenerativeModel(
@@ -244,8 +271,15 @@ class Gemini(BaseLLM):
                 if not response or not hasattr(response, 'text'):
                     raise ValueError("Gemini API 返回了无效的响应")
                 
-                print(f"[Gemini] API 调用成功，响应长度: {len(response.text) if response.text else 0} 字符")
-                return response.text
+                # 打印返回内容
+                response_text = response.text
+                response_preview = response_text[:500] + "..." if len(response_text) > 500 else response_text
+                print(f"[Gemini] === 返回内容 ===")
+                print(f"[Gemini] 响应长度: {len(response_text) if response_text else 0} 字符")
+                print(f"[Gemini] 响应内容预览: {response_preview}")
+                print(f"[Gemini] =================")
+                
+                return response_text
                 
             except TimeoutError as e:
                 last_exception = e
@@ -344,7 +378,15 @@ class Gemini(BaseLLM):
                 "content": msg["content"]
             })
         
-        print(f"[Gemini] 使用备用中转 API 调用，模型: {self.display_model_name}")
+        print(f"[Gemini] 使用备用中转 API 调用")
+        print(f"[Gemini] 模型: {self.model_name} (显示名称: {self.display_model_name})")
+        print(f"[Gemini] Base URL: {self.fallback_api_base}")
+        print(f"[Gemini] === 请求内容 ===")
+        for i, msg in enumerate(openai_messages):
+            content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+            print(f"[Gemini] 消息 {i+1} ({msg['role']}): {content_preview}")
+        print(f"[Gemini] Temperature: {temperature}")
+        print(f"[Gemini] =================")
         
         try:
             completion = self.fallback_client.chat.completions.create(
@@ -354,7 +396,11 @@ class Gemini(BaseLLM):
                 top_p=0.8
             )
             response_text = completion.choices[0].message.content
-            print(f"[Gemini] 备用中转 API 调用成功，响应长度: {len(response_text) if response_text else 0} 字符")
+            response_preview = response_text[:500] + "..." if len(response_text) > 500 else response_text
+            print(f"[Gemini] === 返回内容 ===")
+            print(f"[Gemini] 响应长度: {len(response_text) if response_text else 0} 字符")
+            print(f"[Gemini] 响应内容预览: {response_preview}")
+            print(f"[Gemini] =================")
             return response_text
         except Exception as e:
             print(f"[Gemini] 备用中转 API 调用失败: {e}")
