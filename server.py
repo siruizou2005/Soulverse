@@ -33,8 +33,7 @@ for key in ['OPENAI_API_BASE', 'GEMINI_API_BASE', 'OPENROUTER_BASE_URL']:
     if key in config and config[key]:
         os.environ[key] = config[key]
 
-static_file_abspath = os.path.abspath(os.path.join(os.path.dirname(__file__), 'frontend'))
-app.mount("/frontend", StaticFiles(directory=static_file_abspath), name="frontend")
+
 
 # 预设文件目录
 PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'experiment_presets')
@@ -655,10 +654,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.get("/")
-async def get():
-    html_file = Path("index.html")
-    return HTMLResponse(html_file.read_text(encoding="utf-8"))
+
 
 @app.get("/data/{full_path:path}")
 async def get_file(full_path: str):
