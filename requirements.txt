@@ -21,3 +21,4 @@ pillow
 faiss-cpu
 huggingface_hub[cli]
 python-multipart
+itsdangerous

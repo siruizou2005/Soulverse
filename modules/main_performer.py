@@ -414,6 +414,15 @@ class Performer:
                 relationship_map=relationship_map
             )
         
+        # 检测是否是用户输入，如果是，增强提示
+        is_user_input = False
+        user_emphasis = ""
+        if hasattr(self, 'history_manager') and len(self.history_manager.detailed_history) > 0:
+            last = self.history_manager.detailed_history[-1]
+            if last.get('act_type') == 'user_input' and last.get('role_code') == action_maker_code:
+                is_user_input = True
+                user_emphasis = f"\n\n⚠️ **重要提示**：{action_maker_name} 是真实用户，你必须直接、具体地回应他们的问题或意见。不要岔开话题或自说自话。"
+        
         if use_dual_process and self.personality_profile:
             # 使用双重思维链
             # Step 1: 生成内心独白
@@ -476,7 +485,7 @@ class Performer:
                     "role_name": self.role_name,
                     "nickname": self.nickname,
                     "action_maker_name": action_maker_name,
-                    "action_detail": action_detail, 
+                    "action_detail": action_detail + user_emphasis,  # 添加用户输入强调 
                     "profile": self.role_profile,
                     "action_maker_profile": action_maker_profile,
                     "relation": relation,
@@ -634,11 +643,17 @@ class Performer:
         # 当上一条为用户输入时，优先用用户输入做query并启用语义检索，扩大top_k
         use_user_query = False
         user_query_text = ""
+        is_user_input = False
+        user_emphasis = ""
         if hasattr(self, 'history_manager') and len(self.history_manager) > 0:
             last = self.history_manager.detailed_history[-1]
             if last.get('act_type') in ('user_input', 'user_input_placeholder'):
                 use_user_query = True
                 user_query_text = last.get('detail', '')
+                # 检测是否是用户输入
+                if last.get('act_type') == 'user_input' and last.get('role_code') == action_maker_code:
+                    is_user_input = True
+                    user_emphasis = f"\n\n⚠️ **重要提示**：{action_maker_name} 是真实用户，你必须直接、具体地回应他们的问题或意见。不要岔开话题或自说自话。"
         if use_user_query and user_query_text.strip():
             history = self.retrieve_history(query = user_query_text, top_k = 6, retrieve = True)
         else:
@@ -656,7 +671,7 @@ class Performer:
                 "role_name": self.role_name,
                 "nickname": self.nickname,
                 "action_maker_name": action_maker_name,
-                "action_detail": action_detail, 
+                "action_detail": action_detail + user_emphasis,  # 添加用户输入强调 
                 "profile": self.role_profile,
                 "action_maker_profile": action_maker_profile,
                 "other_roles_info":other_roles_info_text,
@@ -881,8 +896,9 @@ class Performer:
                     self._memory_initialized = True  # 标记为已尝试，避免重复尝试
             
             if self.memory is None:
-                # 如果记忆系统未初始化，使用历史管理器
-                history = "\n" + "\n".join(self.history_manager.get_recent_history(top_k))
+                # 如果记忆系统未初始化，使用历史管理器（包含说话者信息）
+                performers = getattr(self, '_performers_ref', None)
+                history = "\n" + "\n".join(self.history_manager.get_recent_history(top_k, include_speaker=True, performers=performers))
             else:
                 try:
                     search_results = self.memory.search(query, top_k)
@@ -892,9 +908,11 @@ class Performer:
                 except Exception as e:
                     # 如果搜索失败，使用历史管理器作为fallback
                     print(f"Warning: Memory search failed: {e}")
-                    history = "\n" + "\n".join(self.history_manager.get_recent_history(top_k))
+                    performers = getattr(self, '_performers_ref', None)
+                    history = "\n" + "\n".join(self.history_manager.get_recent_history(top_k, include_speaker=True, performers=performers))
         else:
-            history = "\n" + "\n".join(self.history_manager.get_recent_history(top_k))
+            performers = getattr(self, '_performers_ref', None)
+            history = "\n" + "\n".join(self.history_manager.get_recent_history(top_k, include_speaker=True, performers=performers))
         return history
         
     def get_other_roles_info_text(self, other_roles: List[str], if_relation: bool = True, if_profile: bool = True):

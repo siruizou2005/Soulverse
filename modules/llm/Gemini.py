@@ -191,23 +191,23 @@ class Gemini(BaseLLM):
                     # Google Gemini 官方 API 端点
                     api_base = "https://generativelanguage.googleapis.com/v1beta"
                 
-                print(f"[Gemini] 开始 API 调用（尝试 {attempt + 1}/{self.max_retries}）")
-                print(f"[Gemini] 实际调用模型: {self.model_name}")
-                if self.display_model_name != self.model_name:
-                    print(f"[Gemini] 显示名称: {self.display_model_name}")
-                print(f"[Gemini] Base URL: {api_base}")
-                print(f"[Gemini] 超时: {self.timeout}秒")
+                #print(f"[Gemini] 开始 API 调用（尝试 {attempt + 1}/{self.max_retries}）")
+                #print(f"[Gemini] 实际调用模型: {self.model_name}")
+                #if self.display_model_name != self.model_name:
+                #    print(f"[Gemini] 显示名称: {self.display_model_name}")
+                #print(f"[Gemini] Base URL: {api_base}")
+                #print(f"[Gemini] 超时: {self.timeout}秒")
                 
                 # 打印请求内容
-                print(f"[Gemini] === 请求内容 ===")
-                if self.system_instruction:
-                    print(f"[Gemini] System Instruction: {self.system_instruction[:200]}..." if len(self.system_instruction) > 200 else f"[Gemini] System Instruction: {self.system_instruction}")
-                print(f"[Gemini] 消息数量: {len(self.messages)}")
-                for i, msg in enumerate(self.messages):
-                    content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
-                    print(f"[Gemini] 消息 {i+1} ({msg['role']}): {content_preview}")
-                print(f"[Gemini] Temperature: {temperature}")
-                print(f"[Gemini] =================")
+                #print(f"[Gemini] === 请求内容 ===")
+                #if self.system_instruction:
+                #    print(f"[Gemini] System Instruction: {self.system_instruction[:200]}..." if len(self.system_instruction) > 200 else f"[Gemini] System Instruction: {self.system_instruction}")
+                #print(f"[Gemini] 消息数量: {len(self.messages)}")
+                #for i, msg in enumerate(self.messages):
+                #    content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+                #    print(f"[Gemini] 消息 {i+1} ({msg['role']}): {content_preview}")
+                #print(f"[Gemini] Temperature: {temperature}")
+                #print(f"[Gemini] =================")
                 
                 # 创建模型实例，如果有 system_instruction 则传入
                 if self.system_instruction:
@@ -274,10 +274,10 @@ class Gemini(BaseLLM):
                 # 打印返回内容
                 response_text = response.text
                 response_preview = response_text[:500] + "..." if len(response_text) > 500 else response_text
-                print(f"[Gemini] === 返回内容 ===")
-                print(f"[Gemini] 响应长度: {len(response_text) if response_text else 0} 字符")
-                print(f"[Gemini] 响应内容预览: {response_preview}")
-                print(f"[Gemini] =================")
+                #print(f"[Gemini] === 返回内容 ===")
+                #print(f"[Gemini] 响应长度: {len(response_text) if response_text else 0} 字符")
+                #print(f"[Gemini] 响应内容预览: {response_preview}")
+                #print(f"[Gemini] =================")
                 
                 return response_text
                 

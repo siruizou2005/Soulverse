@@ -36,7 +36,11 @@ Characters who have participated in conversations are less likely to be chosen.
 ## Recent Action History
 {history_text}
 
-Return role_code: The role_code of the selected character. Do not include any additional information.
+## Important Notes
+- Ensure all characters have fair opportunities to speak
+- If a character (especially user characters) has not spoken for a long time, prioritize selecting them
+- Return the character's name (e.g., "用户_asd", "小书"), NOT the role_code
+- Do not include any additional information, only return the character name
 """
 
 LOCATION_PROLOGUE_PROMPT = """

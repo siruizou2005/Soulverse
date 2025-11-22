@@ -3,17 +3,44 @@
 提供一些预设的Agent配置，用户可以从中选择并创建
 支持新的三层人格模型格式
 """
+import os
+import json
 from typing import Dict, List, Any, Optional
 from modules.personality_model import (
     PersonalityProfile, CoreTraits, SpeakingStyle, DynamicState,
     DefenseMechanism
 )
+from sw_utils import load_json_file
 
 
 class PresetAgents:
     """预设Agent模板库"""
     
-    PRESET_TEMPLATES = [
+    _PRESET_TEMPLATES = None
+    
+    @staticmethod
+    def _load_preset_templates() -> List[Dict[str, Any]]:
+        """从JSON文件加载预设模板"""
+        if PresetAgents._PRESET_TEMPLATES is not None:
+            return PresetAgents._PRESET_TEMPLATES
+        
+        # 尝试从JSON文件加载
+        json_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'data', 'preset_agents', 'preset_agents.json'
+        )
+        
+        if os.path.exists(json_path):
+            try:
+                PresetAgents._PRESET_TEMPLATES = load_json_file(json_path)
+                return PresetAgents._PRESET_TEMPLATES
+            except Exception as e:
+                print(f"Warning: Failed to load preset templates from JSON: {e}")
+                # 如果加载失败，使用硬编码的默认值
+                pass
+        
+        # 如果JSON文件不存在或加载失败，使用硬编码的默认值（向后兼容）
+        PresetAgents._PRESET_TEMPLATES = [
         {
             "id": "preset_001",
             "name": "文艺青年",
@@ -188,17 +215,19 @@ class PresetAgents:
             "initial_mood": "neutral",
             "initial_energy": 70
         }
-    ]
+        ]
+        return PresetAgents._PRESET_TEMPLATES
     
     @staticmethod
     def get_preset_templates() -> List[Dict[str, Any]]:
         """获取所有预设模板"""
-        return PresetAgents.PRESET_TEMPLATES
+        return PresetAgents._load_preset_templates()
     
     @staticmethod
     def get_preset_by_id(preset_id: str) -> Dict[str, Any]:
         """根据ID获取预设模板"""
-        for template in PresetAgents.PRESET_TEMPLATES:
+        templates = PresetAgents.get_preset_templates()
+        for template in templates:
             if template["id"] == preset_id:
                 return template
         return None

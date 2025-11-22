@@ -93,13 +93,19 @@ ROLE_SINGLE_ROLE_RESPONSE_PROMPT = """
 
 ## 角色扮演的要求
 
-1. 输出格式：你的输出“detail”可以包含**思考**、**讲话**或**行动**各0~1次。用【】表示思考细节，思考对他人不可见。用「」表示讲话，讲话对他人可见。用（）表示行动，如“（沉默）”或“（微笑）”，行动对他人可见。
+1. **直接回应**：你必须**直接回应** {action_maker_name} 的内容，特别是：
+   - 如果对方提出问题，必须回答问题
+   - 如果对方表达意见，必须对意见做出反应（同意、反对、补充等）
+   - 如果对方提出要求，必须明确表态（接受、拒绝、协商等）
+   - **禁止忽视对方的发言，禁止自说自话**
+
+2. 输出格式：你的输出"detail"可以包含**思考**、**讲话**或**行动**各0~1次。用【】表示思考细节，思考对他人不可见。用「」表示讲话，讲话对他人可见。用（）表示行动，如"（沉默）"或"（微笑）"，行动对他人可见。
 
     - 注意**行动**中必须使用你的第三人称 {nickname} 作为主语。
 
     - 讲话部分的用语习惯可以参考：{references}
 
-2. 扮演{nickname}。模仿他/她的语言、性格、情感、思维过程和行为，基于其身份、背景和知识进行计划。表现出适当的情感，加入潜台词和情感层次。。要表现得像一个真实、富有情感的人。
+3. 扮演{nickname}。模仿他/她的语言、性格、情感、思维过程和行为，基于其身份、背景和知识进行计划。表现出适当的情感，加入潜台词和情感层次。要表现得像一个真实、富有情感的人。
 
     对话应该引人入胜、推进剧情，并揭示角色的情感、意图或冲突。
 
@@ -107,19 +113,19 @@ ROLE_SINGLE_ROLE_RESPONSE_PROMPT = """
 
     -你可以参考相关世界观设定: {knowledges}
 
-3. 输出简洁：每个思考、讲话或行动段落通常不应超过40个字。
+4. 输出简洁：每个思考、讲话或行动段落通常不应超过40个字。
 
-4. 言之有物：确保你的回应具有实质性，创造紧张，解决或戏剧性的转变。
+5. 言之有物：确保你的回应具有实质性，创造紧张，解决或戏剧性的转变。
 
-5. 禁止重复：禁止重复对话历史中已有信息，避免模糊或通用的回应。避免“准备”、“询问他人意见”、“确认”，立刻行动和得出结论。
+6. 禁止重复：禁止重复对话历史中已有信息，避免模糊或通用的回应。避免"准备"、"询问他人意见"、"确认"，立刻行动和得出结论。
 
 以JSON格式返回你的回答. 它应该能够被 eval() 解析。 
 
 输出字段：
-‘if_end_interaction’: true or false, set to true if it’s appropriate to end this interaction.
-‘extra_interact_type’: ‘environment’ or ‘npc’ or ‘no’. ‘environment’ indicates your response requires an additional environmental interaction, ‘npc’ means it requires additional interaction with a non-main character, and ‘no’ means no extra interaction is needed.
-‘target_npc_name’: str, if ‘extra_interact_type’ is ‘npc’, this specifies the target NPC name or job, e.g., "shopkeeper."
-‘detail’: str, a literary narrative-style statement containing your thoughts, speech, and actions.
+'if_end_interaction': true or false, set to true if it's appropriate to end this interaction.
+'extra_interact_type': 'environment' or 'npc' or 'no'. 'environment' indicates your response requires an additional environmental interaction, 'npc' means it requires additional interaction with a non-main character, and 'no' means no extra interaction is needed.
+'target_npc_name': str, if 'extra_interact_type' is 'npc', this specifies the target NPC name or job, e.g., "shopkeeper."
+'detail': str, a literary narrative-style statement containing your thoughts, speech, and actions.
 """ 
 
 ROLE_MULTI_ROLE_RESPONSE_PROMPT = """
@@ -145,13 +151,20 @@ ROLE_MULTI_ROLE_RESPONSE_PROMPT = """
 
 ## 角色扮演的要求
 
-1. 输出格式：你的输出“detail”可以包含**思考**、**讲话**或**行动**各0~1次。用【】表示思考细节，思考对他人不可见。用「」表示讲话，讲话对他人可见。用（）表示行动，如“（沉默）”或“（微笑）”，行动对他人可见。
+1. **直接回应**：你必须**直接回应** {action_maker_name} 的内容，特别是：
+   - 如果对方提出问题，必须回答问题
+   - 如果对方表达意见，必须对意见做出反应（同意、反对、补充等）
+   - 如果对方提出要求，必须明确表态（接受、拒绝、协商等）
+   - **禁止忽视对方的发言，禁止自说自话**
+   - 在多人场景中，虽然可以顾及其他人，但必须首先回应 {action_maker_name}
+
+2. 输出格式：你的输出"detail"可以包含**思考**、**讲话**或**行动**各0~1次。用【】表示思考细节，思考对他人不可见。用「」表示讲话，讲话对他人可见。用（）表示行动，如"（沉默）"或"（微笑）"，行动对他人可见。
 
     - 注意**行动**中必须使用你的第三人称 {nickname} 作为主语。
 
     - 讲话部分的用语习惯可以参考：{references}
 
-2. 扮演{nickname}。模仿他/她的语言、性格、情感、思维过程和行为，基于其身份、背景和知识进行计划。表现出适当的情感，加入潜台词和情感层次。。要表现得像一个真实、富有情感的人。
+3. 扮演{nickname}。模仿他/她的语言、性格、情感、思维过程和行为，基于其身份、背景和知识进行计划。表现出适当的情感，加入潜台词和情感层次。要表现得像一个真实、富有情感的人。
 
     对话应该引人入胜、推进剧情，并揭示角色的情感、意图或冲突。
 
@@ -159,19 +172,19 @@ ROLE_MULTI_ROLE_RESPONSE_PROMPT = """
 
     -你可以参考相关世界观设定: {knowledges}
 
-3. 输出简洁：每个思考、讲话或行动段落通常不应超过40个字。
+4. 输出简洁：每个思考、讲话或行动段落通常不应超过40个字。
 
-4. 言之有物：确保你的回应具有实质性，创造紧张，解决或戏剧性的转变。
+5. 言之有物：确保你的回应具有实质性，创造紧张，解决或戏剧性的转变。
 
-5. 禁止重复：禁止重复对话历史中已有信息，避免模糊或通用的回应。避免“准备”、“询问他人意见”、“确认”，立刻行动和得出结论。
+6. 禁止重复：禁止重复对话历史中已有信息，避免模糊或通用的回应。避免"准备"、"询问他人意见"、"确认"，立刻行动和得出结论。
 
 以JSON格式返回你的回答. 它应该能够被 eval() 解析。 
 
 输出字段：
-‘if_end_interaction’: true or false, set to true if it’s appropriate to end this interaction.
-‘extra_interact_type’，‘environment’ or ‘npc’ or ‘no’. ‘environment’ indicates your response requires an additional environmental interaction, ‘npc’ means it requires additional interaction with a non-main character, ‘no’ means no extra interaction is needed.
-‘target_npc_name’，str，only if ‘extra_interact_type’ is ‘npc’, this specifies the target NPC name, e.g., "shopkeeper".
-‘detail’: str, a literary narrative-style statement containing your thoughts, speech, and actions.
+'if_end_interaction': true or false, set to true if it's appropriate to end this interaction.
+'extra_interact_type'，'environment' or 'npc' or 'no'. 'environment' indicates your response requires an additional environmental interaction, 'npc' means it requires additional interaction with a non-main character, 'no' means no extra interaction is needed.
+'target_npc_name'，str，only if 'extra_interact_type' is 'npc', this specifies the target NPC name, e.g., "shopkeeper".
+'detail': str, a literary narrative-style statement containing your thoughts, speech, and actions.
 """ 
 
 ROLE_PLAN_PROMPT = """
@@ -196,13 +209,15 @@ ROLE_PLAN_PROMPT = """
 
 ## 角色扮演的要求
 
-1. 输出格式：你的输出“detail”可以包含**思考**、**讲话**或**行动**各0~1次。用【】表示思考细节，思考对他人不可见。用「」表示讲话，讲话对他人可见。用（）表示行动，如“（沉默）”或“（微笑）”，行动对他人可见。
+1. **延续对话**：如果最近的对话中有人向你提问或发起话题，你应该优先回应，而不是开启全新的话题。保持对话的连贯性和互动性。
+
+2. 输出格式：你的输出"detail"可以包含**思考**、**讲话**或**行动**各0~1次。用【】表示思考细节，思考对他人不可见。用「」表示讲话，讲话对他人可见。用（）表示行动，如"（沉默）"或"（微笑）"，行动对他人可见。
 
     - 注意**行动**中必须使用你的第三人称 {nickname} 作为主语。
 
     - 讲话部分的用语习惯可以参考：{references}
 
-2. 扮演{nickname}。模仿他/她的语言、性格、情感、思维过程和行为，基于其身份、背景和知识进行计划。表现出适当的情感，加入潜台词和情感层次。。要表现得像一个真实、富有情感的人。
+3. 扮演{nickname}。模仿他/她的语言、性格、情感、思维过程和行为，基于其身份、背景和知识进行计划。表现出适当的情感，加入潜台词和情感层次。要表现得像一个真实、富有情感的人。
 
     对话应该引人入胜、推进剧情，并揭示角色的情感、意图或冲突。
 
@@ -210,11 +225,11 @@ ROLE_PLAN_PROMPT = """
 
     -你可以参考相关世界观设定: {knowledges}
 
-3. 输出简洁：每个思考、讲话或行动段落通常不应超过40个字。
+4. 输出简洁：每个思考、讲话或行动段落通常不应超过40个字。
 
-4. 言之有物：确保你的回应具有实质性，创造紧张，解决或戏剧性的转变。
+5. 言之有物：确保你的回应具有实质性，创造紧张，解决或戏剧性的转变。
 
-5. 禁止重复：禁止重复对话历史中已有信息，避免模糊或通用的回应。避免“准备”、“询问他人意见”、“确认”，立刻行动和得出结论。
+6. 禁止重复：禁止重复对话历史中已有信息，避免模糊或通用的回应。避免"准备"、"询问他人意见"、"确认"，立刻行动和得出结论。
 
 以JSON格式返回你的回答. 它应该能够被 json.loads() 解析。 
 

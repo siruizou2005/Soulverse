@@ -1,12 +1,15 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
+from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 import json
 import asyncio
 import os
+import secrets
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 from sw_utils import is_image, load_json_file
 from ScrollWeaver import ScrollWeaver
 from modules.social_story_generator import SocialStoryGenerator, generate_social_story
@@ -17,6 +20,9 @@ from modules.preset_agents import PresetAgents
 from fastapi import UploadFile, File, Form
 
 app = FastAPI()
+# 添加会话中间件
+app.add_middleware(SessionMiddleware, secret_key=secrets.token_urlsafe(32))
+
 default_icon_path = './frontend/assets/images/default-icon.jpg'
 config = load_json_file('config.json')
 for key in config:
@@ -32,6 +38,13 @@ app.mount("/frontend", StaticFiles(directory=static_file_abspath), name="fronten
 
 # 预设文件目录
 PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'experiment_presets')
+
+# 用户数据目录
+USERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users')
+os.makedirs(USERS_DIR, exist_ok=True)
+
+# 简单的用户会话存储（内存中，实际生产环境应使用数据库或Redis）
+user_sessions: dict[str, dict] = {}  # session_id -> user_data
 
 class ConnectionManager:
     def __init__(self):
@@ -72,9 +85,10 @@ class ConnectionManager:
                 "save_dir": config.get("save_dir", ""),
                 "if_save": config.get("if_save", 0),
                 "mode": "free",  # Soulverse模式强制使用free模式
-                "scene_mode": config.get("scene_mode", 1),
+                "scene_mode": 1,  # Soulverse模式使用scene_mode=1让orchestrator调度所有角色
             }
             self.generator_initialized = False
+            print(f"Soulverse模式已启用，scene_mode=1（orchestrator统一调度所有角色）")
             
             # Soulverse模式不再自动创建预设Agent，用户需要自己创建
             # if self.scrollweaver.server.is_soulverse_mode:
@@ -190,10 +204,14 @@ class ConnectionManager:
                     # 注意：这个标志在Goal Setting阶段也会被使用，但Goal Setting阶段用户角色的消息不会yield
                     if user_role_code:
                         self.scrollweaver.server._user_role_code = user_role_code
+                        # 同时传递 possession_mode 状态
+                        self.scrollweaver.server._possession_mode = self.possession_mode.get(client_id, True)
                     else:
                         # 如果用户没有选择角色，清除标志
                         if hasattr(self.scrollweaver.server, '_user_role_code'):
                             delattr(self.scrollweaver.server, '_user_role_code')
+                        if hasattr(self.scrollweaver.server, '_possession_mode'):
+                            delattr(self.scrollweaver.server, '_possession_mode')
                     
                     # 从生成器获取下一条消息
                     # 生成器会正常调用decide_next_actor决定下一个角色
@@ -218,19 +236,28 @@ class ConnectionManager:
                         break
                     
                     # 检查是否轮到用户选择的角色（观察者模式或灵魂降临模式）
-                    is_possession_mode = self.possession_mode.get(client_id, False)
+                    is_possession_mode = self.possession_mode.get(client_id, True)  # 默认True（用户控制模式）
                     
                     # 检查是否是占位消息（占位消息不应该发送到前端）
-                    is_placeholder = message.get('text', '').strip().startswith('__USER_INPUT_PLACEHOLDER__')
+                    is_placeholder = message.get('is_placeholder', False) or message.get('text', '').strip().startswith('__USER_INPUT_PLACEHOLDER__')
                     
                     if user_role_code and message.get('type') == 'role':
                         # 检查当前消息的角色代码是否匹配用户选择的角色
                         # 需要通过角色名称找到角色代码
                         current_role_code = self._get_role_code_by_name(message.get('username', ''))
                         
+                        print(f"[DEBUG] 检查消息: username={message.get('username')}, current_role_code={current_role_code}, user_role_code={user_role_code}, is_placeholder={is_placeholder}, is_possession_mode={is_possession_mode}")
+                        
                         if current_role_code and current_role_code == user_role_code:
-                            # 如果是占位消息，不发送到前端，直接等待用户输入
+                            # 如果是占位消息
                             if is_placeholder:
+                                # 检查是否处于用户控制模式
+                                if not is_possession_mode:
+                                    # AI自由行动模式：跳过占位消息，不等待用户输入
+                                    # 占位消息已经在生成器中被跳过，这里不需要额外处理
+                                    continue
+                                
+                                # 用户控制模式：等待用户输入
                                 original_uuid = message.get('uuid')
                                 
                                 # 暂停生成，等待用户输入（不发送占位消息到前端）
@@ -277,22 +304,40 @@ class ConnectionManager:
                                     if original_uuid:
                                         try:
                                             # 修改占位记录
-                                            self.scrollweaver.server.history_manager.modify_record(original_uuid, augmented_text)
+                                            modified_group = self.scrollweaver.server.history_manager.modify_record(original_uuid, augmented_text)
+                                            
+                                            # 同时更新 act_type 为 user_input（从 user_input_placeholder 改为 user_input）
+                                            for record in self.scrollweaver.server.history_manager.detailed_history:
+                                                if record.get("record_id") == original_uuid:
+                                                    record["act_type"] = "user_input"
+                                                    print(f"[DEBUG] 已更新记录 {original_uuid} 的 act_type 为 user_input")
+                                                    break
 
                                             # 立即回显用户消息到前端（显示原文）
-                                            echo_msg = dict(message)
-                                            echo_msg['text'] = user_text
-                                            echo_msg['is_user'] = True
-                                            echo_msg['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            # 从user_role_code获取正确的用户名
+                                            user_agent = self.scrollweaver.server.performers.get(user_role_code)
+                                            username = user_agent.nickname if user_agent and hasattr(user_agent, 'nickname') else (user_agent.role_name if user_agent and hasattr(user_agent, 'role_name') else message.get('username', '用户'))
+                                            
+                                            echo_msg = {
+                                                'type': 'role',
+                                                'username': username,
+                                                'text': user_text,
+                                                'is_user': True,
+                                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                'uuid': original_uuid
+                                            }
                                             await self.active_connections[client_id].send_json({
                                                 'type': 'message',
                                                 'data': echo_msg
                                             })
+                                            print(f"[DEBUG] 已立即发送用户消息到前端: {username}: {user_text[:50]}...")
 
                                             # 清除future和等待状态（继续推进生成，下一条将是其他Agent响应）
                                             if client_id in self.pending_user_inputs:
                                                 del self.pending_user_inputs[client_id]
                                             self.waiting_for_input[client_id] = False
+                                            
+                                            print(f"[DEBUG] 用户输入已处理: {user_text[:50]}... 等待下一个agent响应")
                                             
                                             # 继续循环，获取下一条消息（下一个agent的响应）
                                             continue
@@ -356,6 +401,8 @@ class ConnectionManager:
             print(f"Story generation cancelled for client {client_id}")
         except Exception as e:
             print(f"Error in generate_story: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             # 清理状态
             if client_id in self.waiting_for_input:
@@ -419,10 +466,16 @@ class ConnectionManager:
                 attempts += 1
                 continue
             
-            # 过滤无效消息
+            # 检查是否是占位消息（占位消息需要特殊处理，不应该被过滤）
             text = message.get("text", "").strip()
-            if not text or text == "__USER_INPUT_PLACEHOLDER__":
-                # 跳过占位消息和空消息，继续获取下一条
+            if text == "__USER_INPUT_PLACEHOLDER__":
+                # 占位消息：返回特殊标记，让 generate_story 处理
+                message["is_placeholder"] = True
+                status = self.scrollweaver.get_current_status()
+                return message, status
+            
+            # 过滤空消息
+            if not text:
                 attempts += 1
                 continue
             
@@ -567,12 +620,14 @@ class ConnectionManager:
             
             # 构造消息格式
             performer = self.scrollweaver.server.performers[role_code]
+            # 优先使用nickname，如果没有则使用role_name
+            username = performer.nickname if hasattr(performer, 'nickname') and performer.nickname else (performer.role_name if hasattr(performer, 'role_name') else role_code)
             message = {
-                'username': performer.role_name,
+                'username': username,
                 'type': 'role',
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 'text': user_text,
-                'icon': performer.icon_path if os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
+                'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
                 'uuid': record_id,
                 'scene': self.scrollweaver.server.cur_round,
                 'is_user': True  # 标记为用户输入
@@ -686,11 +741,36 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             'data': initial_data
         })
         
+        print(f"WebSocket 已连接: client_id={client_id}, 等待用户身份确认...")
+        
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
             
-            if message['type'] == 'user_message':
+            if message['type'] == 'identify_user':
+                # 处理用户身份确认（由前端发送，包含 user_id）
+                user_id = message.get('user_id')
+                print(f"收到用户身份确认: user_id={user_id}")
+                
+                if user_id and user_id in manager.user_agents:
+                    # 自动选择用户的 agent
+                    user_role_code = manager.user_agents[user_id]
+                    manager.user_selected_roles[client_id] = user_role_code
+                    manager.possession_mode[client_id] = True  # 默认开启用户控制模式
+                    print(f"✓ 已自动选择用户Agent: {user_role_code} (user_id={user_id})")
+                    
+                    await websocket.send_json({
+                        'type': 'user_agent_selected',
+                        'data': {
+                            'role_code': user_role_code,
+                            'possession_mode': True,
+                            'message': '已自动选择您的数字孪生'
+                        }
+                    })
+                else:
+                    print(f"✗ 未找到用户Agent (user_id={user_id})")
+            
+            elif message['type'] == 'user_message':
                 # 处理用户消息
                 user_text_incoming = message.get('text', '').strip()
 
@@ -752,6 +832,20 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             'type': 'error',
                             'data': {
                                 'message': f'未找到角色: {role_name}'
+                            }
+                        })
+            
+            elif message['type'] == 'set_possession_mode':
+                # 设置灵魂降临模式（用户控制 vs AI 自由行动）
+                enabled = message.get('enabled', True)
+                manager.possession_mode[client_id] = enabled
+                mode_text = "用户控制" if enabled else "AI自由行动"
+                print(f"Client {client_id} 设置possession_mode为: {mode_text}")
+                await websocket.send_json({
+                    'type': 'possession_mode_updated',
+                    'data': {
+                        'enabled': enabled,
+                        'message': f'已切换到{mode_text}模式'
                             }
                         })
             
@@ -1215,7 +1309,15 @@ async def add_preset_npc(request: Request):
         role_name = custom_name if custom_name and custom_name.strip() else preset_template["name"]
         
         if not role_code:
-            role_code = f"npc_{preset_id}_{int(datetime.now().timestamp())}"
+            # 添加微秒和随机数确保唯一性
+            import random
+            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            random_suffix = random.randint(100, 999)
+            role_code = f"npc_{preset_id}_{timestamp_ms}_{random_suffix}"
+        
+        print(f"\n[添加NPC] preset_id={preset_id}, role_name={role_name}, role_code={role_code}")
+        print(f"[添加前] 沙盒中的agents数量: {len(manager.scrollweaver.server.role_codes)}")
+        print(f"[添加前] agents列表: {list(manager.scrollweaver.server.role_codes)}")
         
         # 创建NPC Agent（使用新的三层人格模型）
         npc_agent = manager.scrollweaver.server.add_npc_agent(
@@ -1223,6 +1325,9 @@ async def add_preset_npc(request: Request):
             role_name=role_name,
             preset_id=preset_id  # 使用preset_id而不是preset_config
         )
+        
+        print(f"[添加后] 沙盒中的agents数量: {len(manager.scrollweaver.server.role_codes)}")
+        print(f"[添加后] agents列表: {list(manager.scrollweaver.server.role_codes)}\n")
         
         # 重置生成器初始化标志，下次调用时会重新初始化
         manager.generator_initialized = False
@@ -1286,6 +1391,506 @@ async def get_daily_report(agent_code: str, date: str = None):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== 用户会话管理 API ====================
+
+def get_user_id_from_session(request: Request) -> Optional[str]:
+    """从会话中获取用户ID"""
+    session_id = request.session.get('user_id')
+    return session_id
+
+@app.post("/api/login")
+async def login(request: Request):
+    """用户登录（简单验证，支持访客模式）"""
+    try:
+        data = await request.json()
+        user_id = data.get('user_id', '').strip()
+        password = data.get('password', '').strip()
+        is_guest = data.get('is_guest', False)
+        
+        if is_guest:
+            # 访客模式：生成临时用户ID
+            user_id = f"guest_{secrets.token_urlsafe(8)}"
+            # 创建访客用户数据
+            user_data = {
+                "user_id": user_id,
+                "username": "访客",
+                "is_guest": True,
+                "created_at": datetime.now().isoformat()
+            }
+        else:
+            # 正常登录：验证用户（简单实现，实际应验证密码）
+            if not user_id:
+                raise HTTPException(status_code=400, detail="用户ID不能为空")
+            
+            # 检查用户是否存在
+            user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+            if os.path.exists(user_file):
+                user_data = load_json_file(user_file)
+            else:
+                # 新用户：创建用户数据
+                user_data = {
+                    "user_id": user_id,
+                    "username": user_id,
+                    "is_guest": False,
+                    "created_at": datetime.now().isoformat()
+                }
+                # 保存用户数据
+                with open(user_file, 'w', encoding='utf-8') as f:
+                    json.dump(user_data, f, ensure_ascii=False, indent=2)
+        
+        # 设置会话
+        request.session['user_id'] = user_id
+        request.session['username'] = user_data.get('username', user_id)
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "username": user_data.get('username', user_id),
+            "is_guest": user_data.get('is_guest', False)
+        }
+    except Exception as e:
+        print(f"Error in login: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/register")
+async def register(request: Request):
+    """用户注册（可选）"""
+    try:
+        data = await request.json()
+        user_id = data.get('user_id', '').strip()
+        password = data.get('password', '').strip()
+        username = data.get('username', user_id).strip()
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="用户ID不能为空")
+        
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if os.path.exists(user_file):
+            raise HTTPException(status_code=400, detail="用户已存在")
+        
+        # 创建新用户
+        user_data = {
+            "user_id": user_id,
+            "username": username,
+            "password": password,  # 简单存储，实际应加密
+            "is_guest": False,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        # 保存用户数据
+        with open(user_file, 'w', encoding='utf-8') as f:
+            json.dump(user_data, f, ensure_ascii=False, indent=2)
+        
+        # 设置会话
+        request.session['user_id'] = user_id
+        request.session['username'] = username
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "username": username
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in register: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/user/me")
+async def get_current_user(request: Request):
+    """获取当前用户信息"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if os.path.exists(user_file):
+            user_data = load_json_file(user_file)
+            # 移除敏感信息
+            user_data.pop('password', None)
+            return {
+                "success": True,
+                "user": user_data
+            }
+        else:
+            # 访客用户或新用户
+            return {
+                "success": True,
+                "user": {
+                    "user_id": user_id,
+                    "username": request.session.get('username', user_id),
+                    "is_guest": True
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_current_user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/user/digital-twin")
+async def save_digital_twin(request: Request):
+    """保存/更新用户的数字孪生 agent"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        data = await request.json()
+        agent_info = data.get('agent_info')
+        
+        if not agent_info:
+            raise HTTPException(status_code=400, detail="agent_info 不能为空")
+        
+        # 加载或创建用户数据
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if os.path.exists(user_file):
+            user_data = load_json_file(user_file)
+        else:
+            user_data = {
+                "user_id": user_id,
+                "username": request.session.get('username', user_id),
+                "created_at": datetime.now().isoformat()
+            }
+        
+        # 保存数字孪生（覆盖旧的）
+        user_data['digital_twin'] = agent_info
+        user_data['digital_twin_updated_at'] = datetime.now().isoformat()
+        
+        # 保存到文件
+        with open(user_file, 'w', encoding='utf-8') as f:
+            json.dump(user_data, f, ensure_ascii=False, indent=2)
+        
+        return {
+            "success": True,
+            "message": "数字孪生已保存",
+            "agent_info": agent_info
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in save_digital_twin: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/user/digital-twin")
+async def get_digital_twin(request: Request):
+    """获取用户的数字孪生 agent"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if os.path.exists(user_file):
+            user_data = load_json_file(user_file)
+            digital_twin = user_data.get('digital_twin')
+            if digital_twin:
+                return {
+                    "success": True,
+                    "agent_info": digital_twin
+                }
+        
+        return {
+            "success": True,
+            "agent_info": None,
+            "message": "用户尚未创建数字孪生"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_digital_twin: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/restore-user-agent")
+async def restore_user_agent(request: Request):
+    """从已保存的数字孪生恢复用户 agent 到沙盒"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        data = await request.json()
+        role_code = data.get('role_code')
+        
+        if not role_code:
+            raise HTTPException(status_code=400, detail="role_code is required")
+        
+        # 检查 agent 是否已存在
+        if role_code in manager.scrollweaver.server.role_codes:
+            print(f"用户Agent {role_code} 已存在于沙盒中，跳过恢复")
+            # 获取现有 agent 信息
+            agent = manager.scrollweaver.server.performers.get(role_code)
+            return {
+                "success": True,
+                "already_exists": True,
+                "agent_info": {
+                    "role_code": role_code,
+                    "nickname": agent.nickname if agent else "Unknown",
+                    "message": "Agent已存在"
+                }
+            }
+        
+        # 获取用户的数字孪生数据
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if not os.path.exists(user_file):
+            raise HTTPException(status_code=404, detail="用户数据不存在")
+        
+        user_data = load_json_file(user_file)
+        digital_twin = user_data.get('digital_twin')
+        if not digital_twin:
+            raise HTTPException(status_code=404, detail="数字孪生数据不存在")
+        
+        # 从数字孪生数据中提取 soul_profile
+        soul_profile = digital_twin.get('extracted_profile', {})
+        if not soul_profile:
+            # 如果没有 extracted_profile，尝试从其他字段构建
+            soul_profile = get_soul_profile(user_id=user_id)
+        
+        # 创建用户 Agent
+        user_agent = manager.scrollweaver.server.add_user_agent(
+            user_id=user_id,
+            role_code=role_code,
+            soul_profile=soul_profile
+        )
+        
+        # 记录用户 Agent 映射
+        manager.user_agents[user_id] = role_code
+        
+        # 重置生成器初始化标志
+        manager.generator_initialized = False
+        
+        print(f"用户Agent已恢复到沙盒: {user_agent.nickname} ({role_code})")
+        
+        return {
+            "success": True,
+            "already_exists": False,
+            "agent_info": {
+                "role_code": role_code,
+                "role_name": user_agent.role_name,
+                "nickname": user_agent.nickname,
+                "location": user_agent.location_name
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in restore_user_agent: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/clear-preset-agents")
+async def clear_preset_agents(request: Request):
+    """清空沙盒中的所有预设agents（保留用户agent）"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        # 获取当前沙盒中的所有agents (注意：role_codes是Server类的属性)
+        role_codes = list(manager.scrollweaver.server.role_codes)
+        removed_count = 0
+        
+        print(f"\n========== 清空预设agents ==========")
+        print(f"清空前沙盒中的agents数量: {len(role_codes)}")
+        print(f"清空前的agents列表: {role_codes}")
+        
+        # 遍历所有agents，移除预设agents（保留用户agent）
+        for role_code in role_codes:
+            # 检查是否是用户agent（user_agent开头）
+            if not role_code.startswith('user_agent_'):
+                # 是预设agent，移除
+                try:
+                    # 从role_codes列表中移除
+                    if role_code in manager.scrollweaver.server.role_codes:
+                        manager.scrollweaver.server.role_codes.remove(role_code)
+                    
+                    # 从performers字典中移除
+                    if role_code in manager.scrollweaver.server.performers:
+                        del manager.scrollweaver.server.performers[role_code]
+                    
+                    removed_count += 1
+                    print(f"✓ 已移除预设agent: {role_code}")
+                except Exception as e:
+                    print(f"✗ 移除agent {role_code} 时出错: {e}")
+        
+        print(f"清空后沙盒中的agents数量: {len(manager.scrollweaver.server.role_codes)}")
+        print(f"清空后的agents列表: {list(manager.scrollweaver.server.role_codes)}")
+        print(f"共移除 {removed_count} 个预设agents")
+        print(f"====================================\n")
+        
+        return {
+            "success": True,
+            "removed_count": removed_count,
+            "message": f"已清空 {removed_count} 个预设agents"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error clearing preset agents: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/neural-match")
+async def neural_match(request: Request):
+    """神经元匹配：计算用户数字孪生与预设 agents 的匹配度"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        # 获取用户的数字孪生
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if not os.path.exists(user_file):
+            raise HTTPException(status_code=404, detail="用户尚未创建数字孪生")
+        
+        user_data = load_json_file(user_file)
+        digital_twin = user_data.get('digital_twin')
+        if not digital_twin:
+            raise HTTPException(status_code=404, detail="用户尚未创建数字孪生")
+        
+        # 获取所有预设 agents
+        preset_templates = PresetAgents.get_preset_templates()
+        
+        # 构建用户 agent 的 profile（用于匹配计算）
+        user_profile = {
+            "interests": digital_twin.get('extracted_profile', {}).get('interests', []),
+            "mbti": digital_twin.get('extracted_profile', {}).get('mbti', ''),
+            "social_goals": digital_twin.get('extracted_profile', {}).get('social_goals', []),
+            "personality": digital_twin.get('extracted_profile', {}).get('personality', '')
+        }
+        
+        # 如果没有提取的 profile，尝试从 agent_info 中获取
+        if not user_profile['interests']:
+            # 尝试从其他字段获取
+            pass
+        
+        # 计算匹配度
+        matches = []
+        for preset in preset_templates:
+            preset_profile = {
+                "interests": preset.get('interests', []),
+                "mbti": preset.get('mbti', ''),
+                "social_goals": preset.get('social_goals', []),
+                "personality": preset.get('personality', '')
+            }
+            
+            # 使用简化的匹配算法（基于兴趣、MBTI、社交目标）
+            compatibility = calculate_simple_compatibility(user_profile, preset_profile)
+            
+            matches.append({
+                "id": preset.get('id'),
+                "name": preset.get('name'),
+                "role": preset.get('description', ''),
+                "match": round(compatibility * 100),
+                "avatar": get_avatar_color(preset.get('id')),
+                "status": "online",
+                "preset": preset
+            })
+        
+        # 按匹配度排序
+        matches.sort(key=lambda x: x['match'], reverse=True)
+        
+        # Top 3 完美共鸣
+        top_matches = matches[:3]
+        
+        # 2 个随机遭遇（从剩余的中随机选择）
+        remaining = matches[3:]
+        random_encounters = []
+        if len(remaining) >= 2:
+            import random
+            random_encounters = random.sample(remaining, 2)
+        elif len(remaining) == 1:
+            random_encounters = remaining
+        
+        return {
+            "success": True,
+            "matched_twins": top_matches,
+            "random_twins": random_encounters
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in neural_match: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+def calculate_simple_compatibility(profile1: dict, profile2: dict) -> float:
+    """简化的匹配度计算算法"""
+    scores = []
+    
+    # 1. 兴趣相似度 (40%)
+    interests1 = set(profile1.get('interests', []))
+    interests2 = set(profile2.get('interests', []))
+    if interests1 and interests2:
+        intersection = len(interests1 & interests2)
+        union = len(interests1 | interests2)
+        interests_score = intersection / union if union > 0 else 0.5
+    else:
+        interests_score = 0.5
+    scores.append(('interests', interests_score, 0.4))
+    
+    # 2. MBTI 兼容度 (30%)
+    mbti1 = profile1.get('mbti', '')
+    mbti2 = profile2.get('mbti', '')
+    if mbti1 and mbti2:
+        if mbti1 == mbti2:
+            mbti_score = 0.9
+        else:
+            # 计算相同维度数
+            same_dims = sum(1 for i in range(min(len(mbti1), len(mbti2))) if mbti1[i] == mbti2[i])
+            if same_dims >= 3:
+                mbti_score = 0.7
+            elif same_dims >= 2:
+                mbti_score = 0.6
+            else:
+                mbti_score = 0.5
+    else:
+        mbti_score = 0.5
+    scores.append(('mbti', mbti_score, 0.3))
+    
+    # 3. 社交目标匹配度 (30%)
+    goals1 = set(profile1.get('social_goals', []))
+    goals2 = set(profile2.get('social_goals', []))
+    if goals1 and goals2:
+        intersection = len(goals1 & goals2)
+        union = len(goals1 | goals2)
+        goals_score = intersection / union if union > 0 else 0.5
+    else:
+        goals_score = 0.5
+    scores.append(('goals', goals_score, 0.3))
+    
+    # 加权平均
+    overall = sum(score * weight for _, score, weight in scores)
+    return overall
+
+def get_avatar_color(preset_id: str) -> str:
+    """根据预设ID返回头像颜色类"""
+    color_map = {
+        "preset_001": "bg-purple-500",
+        "preset_002": "bg-blue-500",
+        "preset_003": "bg-pink-500",
+        "preset_004": "bg-indigo-600",
+        "preset_005": "bg-red-600",
+        "preset_006": "bg-cyan-500",
+        "preset_007": "bg-yellow-500",
+        "preset_008": "bg-green-500",
+        "preset_009": "bg-orange-500",
+        "preset_010": "bg-teal-500",
+        "preset_011": "bg-violet-500",
+        "preset_012": "bg-rose-500"
+    }
+    return color_map.get(preset_id, "bg-slate-500")
 
 @app.post("/api/reset-all")
 async def reset_all():

@@ -378,6 +378,12 @@ def action_detail_decomposer(detail):
     return thoughts,actions,dialogues
 
 def conceal_thoughts(detail):
+    # 确保 detail 是字符串
+    if isinstance(detail, list):
+        detail = " ".join(str(item) for item in detail)
+    elif not isinstance(detail, str):
+        detail = str(detail)
+    
     text = re.sub(r'【.*?】', '', detail)
     text = re.sub(r'\[.*?\]', '', text)
     return text

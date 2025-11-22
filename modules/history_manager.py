@@ -39,8 +39,36 @@ class HistoryManager:
                 return record["detail"]
         return None
     
-    def get_recent_history(self, recent_k = 5):
-        return [record["detail"] for record in self.detailed_history[-recent_k:]]
+    def get_recent_history(self, recent_k = 5, include_speaker = False, performers = None):
+        """
+        获取最近的历史记录
+        
+        Args:
+            recent_k: 最近k条记录
+            include_speaker: 是否包含说话者信息
+            performers: 如果include_speaker=True，需要提供performers字典来获取角色名称
+        """
+        if include_speaker and performers:
+            result = []
+            for record in self.detailed_history[-recent_k:]:
+                role_code = record.get("role_code", "")
+                detail = record.get("detail", "")
+                if role_code and role_code in performers:
+                    # 优先使用nickname，如果没有则使用role_name
+                    performer = performers[role_code]
+                    if hasattr(performer, 'nickname') and performer.nickname:
+                        role_name = performer.nickname
+                    elif hasattr(performer, 'role_name'):
+                        role_name = performer.role_name
+                    else:
+                        role_name = role_code
+                    result.append(f"{role_name}: {detail}")
+                else:
+                    # 如果没有找到performer，仍然显示detail（可能是系统消息等）
+                    result.append(detail)
+            return result
+        else:
+            return [record["detail"] for record in self.detailed_history[-recent_k:]]
     
     def get_subsequent_history(self,start_idx):
         return [record["detail"] for record in self.detailed_history[start_idx:]]

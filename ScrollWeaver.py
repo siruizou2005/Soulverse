@@ -250,6 +250,11 @@ class Server():
         user_agent.world_db = self.orchestrator.db
         user_agent.world_db_name = self.orchestrator.db_name
         
+        # 共享全局history_manager（关键！让所有agent看到相同的历史）
+        user_agent.history_manager = self.history_manager
+        # 保存performers引用，用于格式化历史记录
+        user_agent._performers_ref = self.performers
+        
         # 添加到系统
         self.role_codes.append(role_code)
         self.performers[role_code] = user_agent
@@ -320,6 +325,11 @@ class Server():
         # 共享world_db
         npc_agent.world_db = self.orchestrator.db
         npc_agent.world_db_name = self.orchestrator.db_name
+        
+        # 共享全局history_manager（关键！让所有agent看到相同的历史）
+        npc_agent.history_manager = self.history_manager
+        # 保存performers引用，用于格式化历史记录
+        npc_agent._performers_ref = self.performers
         
         # 添加到系统
         self.role_codes.append(role_code)
@@ -438,7 +448,12 @@ class Server():
                 continue
             
             # Characters in next scene
-            if scene_mode:
+            # Soulverse模式：所有角色都在同一场景
+            if self.is_soulverse_mode:
+                # 强制使用所有角色
+                group = self.role_codes
+                print(f"[Soulverse模式] 本轮参与的角色: {[self.performers[c].nickname for c in group]}")
+            elif scene_mode:
                 group = self._name2code(
                     self.orchestrator.decide_scene_actors(
                         self._get_locations_info(False),
@@ -475,22 +490,78 @@ class Server():
                         recent_k = 3
                         last_is_user = False
                         last_user_text = ""
+                        user_role_code = getattr(self, '_user_role_code', None)
+                        
                         if hasattr(self.history_manager, 'detailed_history') and len(self.history_manager.detailed_history) > 0:
                             last = self.history_manager.detailed_history[-1]
                             last_is_user = last.get('act_type') in ('user_input', 'user_input_placeholder')
                             if last_is_user:
                                 recent_k = 8
                                 last_user_text = last.get('detail', '')
+                                # 如果上一条是用户输入，确保下一轮不立即选择用户角色
+                                # 通过增加历史窗口，让orchestrator看到更多上下文，避免重复选择
+                        
                         history_text = "\n".join(self.history_manager.get_recent_history(recent_k))
                         if last_is_user and last_user_text.strip():
                             focus_prefix = f"【重点】用户刚刚说：{last_user_text}\n请优先回应该内容。\n"
                             history_text = focus_prefix + history_text
-                        role_code =  self._name2code(self.orchestrator.decide_next_actor(history_text,self._get_group_members_info_text(group,status=True),self.script))
+                            
+                            # 如果上一条是用户输入，在提示中明确要求选择其他角色
+                            if user_role_code:
+                                user_name = self.performers[user_role_code].nickname if user_role_code in self.performers else "用户"
+                                history_text = f"【重要】上一条是{user_name}的发言，请选择其他角色进行回应，不要立即选择{user_name}。\n" + history_text
+                        
+                        # 调用orchestrator决定下一个行动的角色
+                        roles_info_text = self._get_group_members_info_text(group, status=True)
+                        print(f"[调度] Group包含 {len(group)} 个角色: {[self.performers[c].nickname for c in group]}")
+                        print(f"[调度DEBUG] 传递给Orchestrator的角色信息:\n{roles_info_text}")
+                        
+                        next_actor_result = self.orchestrator.decide_next_actor(history_text, roles_info_text, self.script)
+                        # 清理返回结果（去除可能的换行、空格等）
+                        next_actor_result = next_actor_result.strip().replace('\n', '').replace('\r', '')
+                        
+                        # 先检查是否直接返回了role_code
+                        if next_actor_result in self.role_codes:
+                            # Orchestrator直接返回了role_code，直接使用
+                            role_code = next_actor_result
+                            print(f"[调度] Orchestrator直接返回了role_code: {role_code}")
+                        else:
+                            # 尝试通过名字匹配
+                            role_code = self._name2code(next_actor_result)
+                            print(f"[调度] Orchestrator选择: {next_actor_result} -> role_code: {role_code}")
+                            
+                            # 检查是否匹配成功
+                            if role_code not in self.role_codes:
+                                print(f"[调度ERROR] 无法匹配角色！Orchestrator返回: '{next_actor_result}', 无法找到对应的role_code")
+                                # 如果匹配失败，优先选择用户角色
+                                user_role_code = getattr(self, '_user_role_code', None)
+                                if user_role_code and user_role_code in group:
+                                    role_code = user_role_code
+                                    print(f"[调度] 匹配失败，优先选择用户角色: {role_code}")
+                                else:
+                                    # 选择第一个未发言的角色
+                                    spoken_codes = set()
+                                    if hasattr(self.history_manager, 'detailed_history'):
+                                        for record in self.history_manager.detailed_history[-10:]:
+                                            if record.get('act_type') in ('plan', 'single', 'multi'):
+                                                spoken_codes.add(record.get('role_code'))
+                                    unspoken = [c for c in group if c not in spoken_codes]
+                                    if unspoken:
+                                        role_code = unspoken[0]
+                                        print(f"[调度] 匹配失败，选择未发言角色: {role_code}")
+                                    else:
+                                        # 最后选择group中的第一个
+                                        role_code = group[0]
+                                        print(f"[调度] 匹配失败，选择group第一个: {role_code}")
                     
-                    # 检查是否是用户选择的角色（如果是，等待用户输入而不是生成计划）
+                    # 检查是否是用户选择的角色（如果是，根据 possession_mode 决定行为）
                     user_role_code = getattr(self, '_user_role_code', None)
-                    if user_role_code and role_code == user_role_code:
-                        # 系统选择了用户控制的角色，不调用plan()生成计划，而是创建占位消息等待用户输入
+                    possession_mode = getattr(self, '_possession_mode', True)  # True=用户控制, False=AI自由行动
+                    
+                    print(f"[检查] role_code={role_code}, user_role_code={user_role_code}, possession_mode={possession_mode}")
+                    
+                    if user_role_code and role_code == user_role_code and possession_mode:
+                        # 用户控制模式：系统选择了用户控制的角色，不调用plan()生成计划，而是创建占位消息等待用户输入
                         record_id = str(uuid.uuid4())
                         placeholder_text = "__USER_INPUT_PLACEHOLDER__"
                         self.record(role_code=role_code,
@@ -503,6 +574,8 @@ class Server():
                         yield ("role", role_code, placeholder_text, record_id)
                         # 跳过plan和interaction，等待用户输入
                         continue
+                    
+                    # AI自由行动模式或非用户角色：正常执行计划
                     
                     # 正常执行计划（非用户角色）
                     yield from self.implement_next_plan(role_code = role_code,
@@ -1061,13 +1134,15 @@ class Server():
     def _get_group_members_info_text(self,group, profile = False,status = False):
         roles_info_text = ""
         for i, role_code in enumerate(group):
-            name = self.performers[role_code].role_name
+            performer = self.performers[role_code]
+            # 优先使用 nickname（更友好），如果没有则使用 role_name
+            name = performer.nickname if hasattr(performer, 'nickname') and performer.nickname else performer.role_name
             roles_info_text += f"{i+1}. {name}\n(role_code:{role_code})\n"
             if profile:
-                profile =  self.performers[role_code].role_profile
+                profile =  performer.role_profile
                 roles_info_text += f"{profile}\n"
             if status:
-                status =  self.performers[role_code].status
+                status =  performer.status
                 roles_info_text += f"{status}\n"
         return roles_info_text
     
@@ -1101,8 +1176,15 @@ class Server():
         return location_info_text
     
     def _name2code(self,roles):
-        name_dic = {self.performers[code].role_name:code for code in self.role_codes}
-        name_dic.update({self.performers[code].nickname:code for code in self.role_codes})
+        name_dic = {}
+        # 构建名字到代码的映射（包括 role_name 和 nickname）
+        for code in self.role_codes:
+            performer = self.performers[code]
+            name_dic[performer.role_name] = code
+            if hasattr(performer, 'nickname') and performer.nickname:
+                name_dic[performer.nickname] = code
+        
+        print(f"[DEBUG] _name2code 映射表: {name_dic}")
         # helper: fallback suffix-based match like 'user_rdon' -> match '*rdon'
         def _suffix_match(name: str):
             if not isinstance(name, str):
