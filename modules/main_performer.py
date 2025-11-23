@@ -311,6 +311,8 @@ class Performer:
             "location": self.location_name,
             "references": references,
             "knowledges": knowledges,
+            "big_five_info": self._format_big_five_info(),
+            "speaking_style_info": self._format_speaking_style_info()
         })
         
         # 添加风格提示

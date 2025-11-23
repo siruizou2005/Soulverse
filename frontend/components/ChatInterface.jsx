@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Square, User, Bot, UserCircle, FileText, X, Loader } from 'lucide-react';
+import { Play, Square, User, Bot, UserCircle, FileText, X, Loader, LogOut, ArrowLeft, Trash2 } from 'lucide-react';
 
-export default function ChatInterface({ selectedAgents = [], onUserClick }) {
+export default function ChatInterface({ selectedAgents = [], onUserClick, onBackToMatching, onLogout }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -13,6 +13,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
   const [reportData, setReportData] = useState(null); // 社交报告数据
   const [showReport, setShowReport] = useState(false); // 是否显示报告模态框
   const [generatingReport, setGeneratingReport] = useState(false); // 是否正在生成报告
+  const [aiSuggestions, setAiSuggestions] = useState(null); // AI建议的选项
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false); // 是否正在加载建议
   const messagesEndRef = useRef(null);
   const clientId = useRef(Math.random().toString(36).substring(7));
 
@@ -122,6 +124,14 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
       if (generatingReport) {
         setGeneratingReport(false);
       }
+      if (loadingSuggestions) {
+        setLoadingSuggestions(false);
+      }
+    } else if (data.type === 'auto_complete_options') {
+      // AI建议选项已生成
+      console.log('✓ AI建议已生成:', data.data);
+      setAiSuggestions(data.data.options);
+      setLoadingSuggestions(false);
     }
   };
 
@@ -230,6 +240,50 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
     }));
   };
 
+  const handleClearMessages = () => {
+    if (window.confirm('确定要清除所有聊天消息吗？')) {
+      setMessages([]);
+    }
+  };
+
+  const handleBackToMatching = () => {
+    if (window.confirm('确定要返回匹配页吗？这将暂停当前对话。')) {
+      onBackToMatching?.();
+    }
+  };
+
+  const handleLogout = () => {
+    if (window.confirm('确定要退出登录吗？')) {
+      onLogout?.();
+    }
+  };
+
+  const handleRequestSuggestions = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!waitingForInput) return;
+
+    setLoadingSuggestions(true);
+    ws.send(JSON.stringify({
+      type: 'auto_complete'
+    }));
+  };
+
+  const handleSelectSuggestion = (text) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    ws.send(JSON.stringify({
+      type: 'select_auto_option',
+      selected_text: text
+    }));
+
+    setAiSuggestions(null); // 清除建议
+  };
+
+  const handleCloseSuggestions = () => {
+    setAiSuggestions(null);
+    setLoadingSuggestions(false);
+  };
+
   return (
     <div className="flex-1 relative z-10 flex flex-col bg-black">
       {/* 顶部导航栏 */}
@@ -244,8 +298,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
           <button
             onClick={handleToggleAiControl}
             className={`px-3 py-1.5 text-xs font-mono rounded-full transition-all flex items-center gap-1.5 ${aiControlEnabled
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'
-                : 'bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30'
+              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'
+              : 'bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30'
               }`}
             title={aiControlEnabled ? "当前：用户控制模式（点击切换为AI自由行动）" : "当前：AI自由行动模式（点击切换为用户控制）"}
           >
@@ -286,6 +340,34 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
               <FileText className="w-5 h-5" />
             )}
           </button>
+          {/* 清除聊天内容按钮 */}
+          <button
+            onClick={handleClearMessages}
+            className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            title="清除聊天内容"
+          >
+            <Trash2 className="w-5 h-5" />
+          </button>
+          {/* 返回匹配页按钮 */}
+          {onBackToMatching && (
+            <button
+              onClick={handleBackToMatching}
+              className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+              title="返回匹配页"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
+          {/* 退出登录按钮 */}
+          {onLogout && (
+            <button
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
+              title="退出登录"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          )}
           {onUserClick && (
             <button
               onClick={onUserClick}
@@ -315,8 +397,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
                 className={`flex ${msg.is_user ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`max-w-[75%] rounded-lg p-4 ${msg.is_user
-                    ? 'bg-cyan-500/20 border border-cyan-500/30 text-white'
-                    : 'bg-slate-900/50 border border-slate-800 text-slate-200'
+                  ? 'bg-cyan-500/20 border border-cyan-500/30 text-white'
+                  : 'bg-slate-900/50 border border-slate-800 text-slate-200'
                   }`}>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-semibold text-sm">{msg.username}</span>
@@ -346,6 +428,74 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
             </p>
           </div>
         )}
+
+        {/* AI建议按钮 - 仅在等待输入且用户控制模式下显示 */}
+        {waitingForInput && aiControlEnabled && !aiSuggestions && (
+          <div className="mb-3 flex justify-end">
+            <button
+              onClick={handleRequestSuggestions}
+              disabled={loadingSuggestions}
+              className="px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              title="让AI生成三个回复建议"
+            >
+              {loadingSuggestions ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  <span>生成中...</span>
+                </>
+              ) : (
+                <>
+                  <Bot className="w-4 h-4" />
+                  <span>AI建议</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* AI建议选项卡片 */}
+        {aiSuggestions && aiSuggestions.length > 0 && (
+          <div className="mb-4 bg-slate-900/80 border border-purple-500/30 rounded-xl p-4 shadow-[0_0_30px_rgba(168,85,247,0.15)]">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-purple-300 flex items-center gap-2">
+                <Bot className="w-4 h-4" />
+                ✨ AI建议 - 选择一个回复
+              </h3>
+              <button
+                onClick={handleCloseSuggestions}
+                className="text-slate-400 hover:text-white transition-colors"
+                title="关闭建议"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {aiSuggestions.map((option, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSelectSuggestion(option.text)}
+                  className="w-full text-left p-3 bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-purple-500/50 rounded-lg transition-all group"
+                >
+                  <div className="flex items-start gap-2 mb-1">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${option.style === 'aggressive'
+                        ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                        : option.style === 'balanced'
+                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                          : 'bg-green-500/20 text-green-300 border border-green-500/40'
+                      }`}>
+                      {option.name}
+                    </span>
+                    <span className="text-xs text-slate-400 flex-1">{option.description}</span>
+                  </div>
+                  <p className="text-sm text-slate-200 group-hover:text-white transition-colors leading-relaxed">
+                    {option.text}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-4">
           <textarea
             value={inputText}
@@ -354,8 +504,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
             placeholder={waitingForInput ? `为 ${waitingRoleName} 输入消息...` : '等待轮到你的角色发言...'}
             disabled={!waitingForInput}
             className={`flex-1 bg-slate-900/50 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none resize-none transition-all ${waitingForInput
-                ? 'border-cyan-500/50 focus:border-cyan-500'
-                : 'border-slate-700 opacity-50 cursor-not-allowed'
+              ? 'border-cyan-500/50 focus:border-cyan-500'
+              : 'border-slate-700 opacity-50 cursor-not-allowed'
               }`}
             rows={2}
           />
@@ -363,8 +513,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
             onClick={handleSend}
             disabled={!waitingForInput || !inputText.trim() || !ws || ws.readyState !== WebSocket.OPEN}
             className={`px-6 py-3 font-bold rounded-lg transition-all ${waitingForInput && inputText.trim()
-                ? 'bg-cyan-500 hover:bg-cyan-400 text-black'
-                : 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-50'
+              ? 'bg-cyan-500 hover:bg-cyan-400 text-black'
+              : 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-50'
               }`}
           >
             发送
@@ -394,7 +544,7 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             {/* 报告内容 */}
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
               <div className="prose prose-invert max-w-none">

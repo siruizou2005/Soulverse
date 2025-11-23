@@ -1530,6 +1530,23 @@ async def get_current_user(request: Request):
         print(f"Error in get_current_user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/logout")
+async def logout(request: Request):
+    """用户退出登录"""
+    try:
+        # 清除会话
+        request.session.clear()
+        
+        return {
+            "success": True,
+            "message": "已退出登录"
+        }
+    except Exception as e:
+        print(f"Error in logout: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/user/digital-twin")
 async def save_digital_twin(request: Request):
     """保存/更新用户的数字孪生 agent"""

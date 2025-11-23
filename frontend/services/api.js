@@ -39,6 +39,19 @@ export const api = {
     }
   },
 
+  async logout() {
+    try {
+      const response = await fetch(`${API_BASE}/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      return response.json();
+    } catch (error) {
+      console.error('logout error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
   // 数字孪生
   async saveDigitalTwin(agentInfo) {
     const response = await fetch(`${API_BASE}/user/digital-twin`, {
@@ -89,7 +102,7 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     if (userId) formData.append('user_id', userId);
-    
+
     const response = await fetch(`${API_BASE}/create-agent-from-file`, {
       method: 'POST',
       body: formData
@@ -103,7 +116,7 @@ export const api = {
     const response = await fetch(`${API_BASE}/create-user-agent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         user_id: userId,
         role_code: roleCode
       })
@@ -127,7 +140,7 @@ export const api = {
     const response = await fetch(`${API_BASE}/add-preset-npc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         preset_id: presetId,
         custom_name: customName
       })

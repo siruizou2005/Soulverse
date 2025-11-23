@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Atom, ChevronRight, Play, User } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import CosmicBackground from './CosmicBackground';
 import NeuralMatching from './NeuralMatching';
 import ChatInterface from './ChatInterface';
@@ -8,6 +9,7 @@ import UserAgentStatus from './UserAgentStatus';
 import { api } from '../services/api';
 
 export default function UniverseView({ user }) {
+  const router = useRouter();
   const [showWizard, setShowWizard] = useState(false);
   const [showUserStatus, setShowUserStatus] = useState(false);
   const [selectedAgents, setSelectedAgents] = useState([]);
@@ -225,6 +227,25 @@ export default function UniverseView({ user }) {
     }
   };
 
+  const handleBackToMatching = () => {
+    setChatStarted(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      const result = await api.logout();
+      if (result.success) {
+        // 跳转到登录页
+        router.push('/login');
+      } else {
+        alert('退出登录失败: ' + (result.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('退出登录时出错:', error);
+      alert('退出登录时出错');
+    }
+  };
+
   if (!hasDigitalTwin) {
     return (
       <div className="relative w-full h-screen bg-black text-white overflow-hidden flex items-center justify-center">
@@ -260,6 +281,8 @@ export default function UniverseView({ user }) {
         <ChatInterface
           selectedAgents={selectedAgents}
           onUserClick={() => setShowUserStatus(true)}
+          onBackToMatching={handleBackToMatching}
+          onLogout={handleLogout}
         />
         {showUserStatus && (
           <UserAgentStatus
