@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Square, User, Bot, UserCircle } from 'lucide-react';
+import { Play, Square, User, Bot, UserCircle, FileText, X, Loader } from 'lucide-react';
 
 export default function ChatInterface({ selectedAgents = [], onUserClick }) {
   const [messages, setMessages] = useState([]);
@@ -9,6 +9,10 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
   const [waitingForInput, setWaitingForInput] = useState(false); // 是否正在等待用户输入
   const [waitingRoleName, setWaitingRoleName] = useState(''); // 等待输入的角色名称
   const [ws, setWs] = useState(null);
+  const [userAgentRoleCode, setUserAgentRoleCode] = useState(null); // 用户agent的role_code
+  const [reportData, setReportData] = useState(null); // 社交报告数据
+  const [showReport, setShowReport] = useState(false); // 是否显示报告模态框
+  const [generatingReport, setGeneratingReport] = useState(false); // 是否正在生成报告
   const messagesEndRef = useRef(null);
   const clientId = useRef(Math.random().toString(36).substring(7));
 
@@ -90,6 +94,9 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
     } else if (data.type === 'user_agent_selected') {
       // 用户 agent 已选择
       console.log('✓ 用户Agent已选择:', data.data);
+      if (data.data.role_code) {
+        setUserAgentRoleCode(data.data.role_code);
+      }
     } else if (data.type === 'waiting_for_user_input') {
       // 等待用户输入
       console.log('⏳ 等待用户输入:', data.data);
@@ -103,9 +110,18 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
         setWaitingForInput(false);
         setWaitingRoleName('');
       }
+    } else if (data.type === 'social_report_exported') {
+      // 社交报告已生成
+      console.log('✓ 社交报告已生成:', data.data);
+      setReportData(data.data);
+      setShowReport(true);
+      setGeneratingReport(false);
     } else if (data.type === 'error') {
       // 错误消息，可能需要保持等待状态或取消
       console.error('错误:', data.data);
+      if (generatingReport) {
+        setGeneratingReport(false);
+      }
     }
   };
 
@@ -170,6 +186,50 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
     }
   };
 
+  const handleGenerateReport = async () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.error('WebSocket未连接');
+      return;
+    }
+
+    // 如果没有role_code，尝试从API获取
+    let roleCode = userAgentRoleCode;
+    if (!roleCode) {
+      try {
+        const userResult = await fetch('/api/user/me', { credentials: 'include' });
+        if (userResult.ok) {
+          const userData = await userResult.json();
+          if (userData.success && userData.user) {
+            // 尝试从数字孪生获取role_code
+            const twinResult = await fetch('/api/user/digital-twin', { credentials: 'include' });
+            if (twinResult.ok) {
+              const twinData = await twinResult.json();
+              if (twinData.success && twinData.agent_info && twinData.agent_info.role_code) {
+                roleCode = twinData.agent_info.role_code;
+                setUserAgentRoleCode(roleCode);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('获取用户agent信息失败:', error);
+      }
+    }
+
+    if (!roleCode) {
+      alert('无法获取用户agent信息，请确保已创建数字孪生');
+      return;
+    }
+
+    // 发送生成报告请求
+    setGeneratingReport(true);
+    ws.send(JSON.stringify({
+      type: 'generate_social_report',
+      agent_code: roleCode,
+      format: 'text'
+    }));
+  };
+
   return (
     <div className="flex-1 relative z-10 flex flex-col bg-black">
       {/* 顶部导航栏 */}
@@ -211,6 +271,19 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
               <Square className="w-5 h-5" />
             ) : (
               <Play className="w-5 h-5" />
+            )}
+          </button>
+          {/* 生成社交报告按钮 */}
+          <button
+            onClick={handleGenerateReport}
+            disabled={generatingReport}
+            className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={generatingReport ? "正在生成报告..." : "生成社交报告"}
+          >
+            {generatingReport ? (
+              <Loader className="w-5 h-5 animate-spin" />
+            ) : (
+              <FileText className="w-5 h-5" />
             )}
           </button>
           {onUserClick && (
@@ -298,6 +371,54 @@ export default function ChatInterface({ selectedAgents = [], onUserClick }) {
           </button>
         </div>
       </div>
+
+      {/* 社交报告模态框 */}
+      {showReport && reportData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-cyan-500/30 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden shadow-[0_0_50px_rgba(6,182,212,0.15)] flex flex-col">
+            {/* 模态框头部 */}
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold text-white">社交报告</h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  {reportData.agent_code || '用户Agent'} · {reportData.timestamp || new Date().toLocaleString()}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowReport(false);
+                  setReportData(null);
+                }}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* 报告内容 */}
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+              <div className="prose prose-invert max-w-none">
+                <div className="text-slate-200 whitespace-pre-wrap leading-relaxed">
+                  {reportData.report_text || reportData.report || '报告内容为空'}
+                </div>
+              </div>
+            </div>
+
+            {/* 模态框底部 */}
+            <div className="p-6 border-t border-slate-800 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowReport(false);
+                  setReportData(null);
+                }}
+                className="px-6 py-2 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-colors"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

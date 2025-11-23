@@ -23,22 +23,59 @@ class EmbeddingModel(EmbeddingFunction[Documents]):
         self._fallback = False
         self._fallback_dim = 384
 
-        cache_root = os.path.expanduser(os.environ.get("MODELSCOPE_CACHE", "~/.cache/modelscope/hub"))
-        local_snapshot_root = ""
-        if "/" in model_name:
-            model_provider, model_smallname = model_name.split("/", 1)
-            local_snapshot_root = os.path.join(cache_root, f"models--{model_provider}--{model_smallname}/snapshots/")
-
         try:
-            if local_snapshot_root and os.path.exists(local_snapshot_root) and get_child_folders(local_snapshot_root):
-                snapshot_dir = os.path.join(local_snapshot_root, get_child_folders(local_snapshot_root)[0])
-                self.tokenizer = AutoTokenizer.from_pretrained(snapshot_dir)
-                self.model = AutoModel.from_pretrained(snapshot_dir)
+            # 获取缓存目录
+            cache_dir = os.path.expanduser(os.environ.get("MODELSCOPE_CACHE", "~/.cache/modelscope/hub"))
+            
+            print(f"\n{'='*60}")
+            print(f"[Embedding] Loading model: {model_name}")
+            print(f"[Embedding] Cache directory: {cache_dir}")
+            
+            # ModelScope使用 models/PROVIDER/MODEL_NAME 格式存储
+            # 例如: models/BAAI/bge-small-zh
+            local_model_path = None
+            if "/" in model_name:
+                # ModelScope格式: models/PROVIDER/MODEL_NAME
+                modelscope_path = os.path.join(cache_dir, "models", model_name)
+                if os.path.exists(modelscope_path):
+                    local_model_path = modelscope_path
+                    print(f"[Embedding] ✓ Found cached model at: {modelscope_path}")
+            
+            # 如果找到本地缓存，直接加载（不联网）
+            if local_model_path:
+                print(f"[Embedding] Loading from local cache (offline mode)...")
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    local_model_path,
+                    local_files_only=True,
+                    trust_remote_code=True
+                )
+                self.model = AutoModel.from_pretrained(
+                    local_model_path,
+                    local_files_only=True,
+                    trust_remote_code=True
+                )
+                print(f"[Embedding] ✓ Successfully loaded from cache")
             else:
-                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-                self.model = AutoModel.from_pretrained(model_name)
+                # 缓存不存在，从远程下载（会自动保存到cache_dir）
+                print(f"[Embedding] Cache not found, downloading...")
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    model_name,
+                    cache_dir=cache_dir,
+                    trust_remote_code=True
+                )
+                self.model = AutoModel.from_pretrained(
+                    model_name,
+                    cache_dir=cache_dir,
+                    trust_remote_code=True
+                )
+                print(f"[Embedding] ✓ Successfully downloaded and cached")
+            
+            print(f"{'='*60}\n")
+            
         except Exception as exc:
-            print(f"Warning: Failed to load embedding model '{model_name}' ({exc}). Falling back to hash-based embeddings.")
+            print(f"[Embedding] ✗ Failed to load '{model_name}': {exc}")
+            print(f"[Embedding] Falling back to hash-based embeddings")
+            print(f"{'='*60}\n")
             self._fallback = True
 
     def __call__(self, input: Documents) -> Embeddings:
