@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Atom, ChevronRight, Play, User } from 'lucide-react';
+import { Atom, ChevronRight, Play, User, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import CosmicBackground from './CosmicBackground';
 import NeuralMatching from './NeuralMatching';
@@ -274,8 +274,8 @@ export default function UniverseView({ user }) {
       <div className="relative w-full h-screen bg-black text-white overflow-hidden flex">
         <CosmicBackground intensity={0.8} />
         <NeuralMatching
-          matchedTwins={selectedAgents.filter(a => a.match > 30)}
-          randomTwins={selectedAgents.filter(a => a.match <= 30)}
+          matchedTwins={selectedAgents.slice(0, 3)}
+          randomTwins={selectedAgents.slice(3)}
           onAgentSelect={(agent) => console.log('Agent selected:', agent)}
         />
         <ChatInterface
@@ -300,8 +300,8 @@ export default function UniverseView({ user }) {
 
       {/* 左侧边栏：匹配系统 */}
       <NeuralMatching
-        matchedTwins={selectedAgents.filter(a => a.match > 30)}
-        randomTwins={selectedAgents.filter(a => a.match <= 30)}
+        matchedTwins={selectedAgents.slice(0, 3)}
+        randomTwins={selectedAgents.slice(3)}
         onAgentSelect={(agent) => console.log('Agent selected:', agent)}
       />
 
@@ -318,8 +318,16 @@ export default function UniverseView({ user }) {
             <button
               onClick={() => setShowUserStatus(true)}
               className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+              title="我的数字孪生"
             >
               <User className="w-5 h-5" />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
+              title="退出登录"
+            >
+              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </header>

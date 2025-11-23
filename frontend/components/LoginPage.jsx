@@ -6,14 +6,16 @@ import { api } from '../services/api';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [userId, setUserId] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (!userId.trim()) return;
+
     setLoading(true);
     try {
-      const result = await api.login(userId, password, false);
+      // Password is ignored by backend, sending empty string
+      const result = await api.login(userId, '', false);
       if (result.success) {
         onLoginSuccess(result);
       } else {
@@ -23,23 +25,6 @@ export default function LoginPage({ onLoginSuccess }) {
     } catch (error) {
       console.error('Login error:', error);
       alert('登录失败: ' + error.message);
-      setLoading(false);
-    }
-  };
-
-  const handleGuestMode = async () => {
-    setLoading(true);
-    try {
-      const result = await api.login('', '', true);
-      if (result.success) {
-        onLoginSuccess(result);
-      } else {
-        alert('访客模式失败: ' + (result.message || '未知错误'));
-        setLoading(false);
-      }
-    } catch (error) {
-      console.error('Guest mode error:', error);
-      alert('访客模式失败: ' + error.message);
       setLoading(false);
     }
   };
@@ -67,48 +52,33 @@ export default function LoginPage({ onLoginSuccess }) {
           <p className="text-slate-400 mt-2">连接到神经接口</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={handleLogin} className="space-y-6">
           <div className="group">
             <label className="block text-slate-500 text-sm mb-1 group-focus-within:text-cyan-400 transition-colors">
-              通信ID / 邮箱
+              通信ID (User ID)
             </label>
             <input
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 outline-none transition-all"
-            />
-          </div>
-          <div className="group">
-            <label className="block text-slate-500 text-sm mb-1 group-focus-within:text-cyan-400 transition-colors">
-              访问密钥 / 密码
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 outline-none transition-all"
+              placeholder="输入您的唯一标识..."
+              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 outline-none transition-all placeholder:text-slate-600"
+              autoFocus
             />
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-4 rounded-lg mt-6 transition-all transform hover:scale-[1.02] shadow-lg disabled:opacity-50"
+            disabled={loading || !userId.trim()}
+            className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-4 rounded-lg transition-all transform hover:scale-[1.02] shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? '初始化中...' : '初始化链接'}
+            {loading ? '初始化中...' : '建立链接'}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
-          <span className="text-slate-500 text-sm">访客模式? </span>
-          <button
-            onClick={handleGuestMode}
-            disabled={loading}
-            className="text-cyan-400 text-sm hover:underline disabled:opacity-50"
-          >
-            立即漫游
-          </button>
+        <div className="mt-6 text-center text-xs text-slate-600">
+          <p>系统处于开放测试模式</p>
+          <p>输入任意ID即可自动创建或恢复账号</p>
         </div>
       </motion.div>
     </motion.div>

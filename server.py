@@ -10,7 +10,7 @@ import secrets
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-from sw_utils import is_image, load_json_file
+from sw_utils import is_image, load_json_file, get_models, json_parser
 from ScrollWeaver import ScrollWeaver
 from modules.social_story_generator import SocialStoryGenerator, generate_social_story
 from modules.daily_report import DailyReportGenerator, generate_daily_report
@@ -19,7 +19,19 @@ from modules.profile_extractor import ProfileExtractor, extract_profile_from_tex
 from modules.preset_agents import PresetAgents
 from fastapi import UploadFile, File, Form
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
+
+# 配置 CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有来源，生产环境应限制为前端域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 添加会话中间件
 app.add_middleware(SessionMiddleware, secret_key=secrets.token_urlsafe(32))
 
@@ -1547,6 +1559,178 @@ async def logout(request: Request):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/generate-digital-twin-profile")
+async def generate_digital_twin_profile(request: Request):
+    """生成数字孪生完整画像"""
+    try:
+        data = await request.json()
+        
+        # 提取输入数据
+        mbti_type = data.get('mbti_type')
+        mbti_answers = data.get('mbti_answers', [])
+        big_five_answers = data.get('big_five_answers', [])
+        chat_history = data.get('chat_history', '')
+        user_name = data.get('user_name', '')
+        relationship = data.get('relationship', '')
+        
+        # 1. 确定MBTI类型
+        final_mbti = mbti_type
+        if not final_mbti and mbti_answers:
+            # 计算MBTI
+            counts = {'E': 0, 'I': 0, 'S': 0, 'N': 0, 'T': 0, 'F': 0, 'J': 0, 'P': 0}
+            for answer in mbti_answers:
+                if answer:
+                    counts[answer] += 1
+            
+            final_mbti = (
+                ('E' if counts['E'] >= counts['I'] else 'I') +
+                ('S' if counts['S'] >= counts['N'] else 'N') +
+                ('T' if counts['T'] >= counts['F'] else 'T') +
+                ('J' if counts['J'] >= counts['P'] else 'P')
+            )
+            
+        # 2. 计算Big Five分数
+        big_five_scores = None
+        if big_five_answers:
+            scores = {
+                'openness': [], 
+                'conscientiousness': [], 
+                'extraversion': [], 
+                'agreeableness': [], 
+                'neuroticism': []
+            }
+            
+            for answer in big_five_answers:
+                if answer and 'dimension' in answer and 'value' in answer:
+                    dim = answer['dimension']
+                    if dim in scores:
+                        scores[dim].append(float(answer['value']))
+            
+            big_five_scores = {}
+            for dim, values in scores.items():
+                if values:
+                    big_five_scores[dim] = sum(values) / len(values)
+                else:
+                    big_five_scores[dim] = 0.5
+        
+        # 3. 构建Prompt
+        prompt = "你是一位专业的数字孪生人格分析师。请基于以下所有信息，生成用户的完整人格画像。\n\n"
+        
+        # MBTI信息
+        prompt += "## 一、MBTI类型信息\n"
+        if mbti_type:
+            prompt += f"**用户自己选择的MBTI类型**: {mbti_type}\n**重要**: 这是用户自己确定的MBTI类型，你必须使用这个类型，不可更改。\n"
+        elif final_mbti:
+            prompt += f"**根据问卷计算的MBTI类型**: {final_mbti}\n"
+        else:
+            prompt += "**MBTI类型**: 未知\n"
+            
+        # 核心层信息
+        prompt += "\n## 二、核心层信息\n"
+        if big_five_scores:
+            prompt += f"**Big Five评分**（基于问卷计算）: {json.dumps(big_five_scores, ensure_ascii=False, indent=2)}\n"
+        else:
+            prompt += "用户未完成核心层问卷。\n"
+            if chat_history:
+                prompt += "**注意**: 请基于后续提供的聊天记录，推断用户的Big Five人格特征、价值观和防御机制。\n"
+                
+        # 聊天记录信息
+        prompt += "\n## 三、用户聊天记录\n"
+        if chat_history:
+            prompt += f"**用户名称**: {user_name}\n"
+            if relationship:
+                prompt += f"**聊天对象关系**: {relationship}\n"
+            
+            # 截取最近的聊天记录以避免超出token限制
+            # 简单截取最后10000个字符
+            truncated_history = chat_history[-10000:] if len(chat_history) > 10000 else chat_history
+            prompt += f"\n**聊天记录内容**:\n{truncated_history}\n\n"
+            
+            prompt += "**重要说明**:\n"
+            prompt += f"- 请识别出用户自己发送的消息（发送者为\"{user_name}\"的消息）\n"
+            prompt += "- 基于用户自己的消息，分析语言风格特征（表象层）\n"
+            prompt += "- 基于完整聊天记录，分析用户的性格特征\n"
+        else:
+            prompt += "用户未上传聊天记录。\n"
+            
+        # 生成要求
+        prompt += """
+\n## 四、生成要求
+
+请生成一个完整的JSON对象，包含以下所有字段：
+
+{
+  "core_traits": {
+    "mbti": "MBTI类型",
+    "big_five": {"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5},
+    "values": ["价值观1", "价值观2", "价值观3"],
+    "defense_mechanism": "防御机制名称"
+  },
+  "speaking_style": {
+    "sentence_length": "short/medium/long/mixed",
+    "vocabulary_level": "academic/casual/network/mixed",
+    "punctuation_habit": "minimal/standard/excessive/mixed",
+    "emoji_usage": {
+      "frequency": "none/low/medium/high",
+      "preferred": ["表情1", "表情2"],
+      "avoided": []
+    },
+    "catchphrases": ["口头禅1", "口头禅2"],
+    "tone_markers": ["语气词1", "语气词2"]
+  }
+}
+
+**重要规则**:
+1. **MBTI类型**: 必须使用确定的MBTI类型
+2. **核心层数据**: 
+   - 如果有Big Five评分，请直接使用
+   - 如果没有，请基于聊天记录推断（0-1之间的数值）
+   - values数组生成3-5个中文词汇
+   - defense_mechanism从以下选择：Rationalization, Projection, Denial, Repression, Sublimation, Displacement, ReactionFormation, Humor, Intellectualization
+3. **表象层数据**: 
+   - 如果有聊天记录，必须深入分析生成speaking_style对象
+   - 如果没有聊天记录，speaking_style可以为null
+4. 只返回JSON对象，不要包含markdown代码块标记。
+"""
+
+        # 4. 调用LLM
+        # 使用配置中的默认模型
+        model_name = config.get("role_llm_name", "gpt-3.5-turbo")
+        llm = get_models(model_name)
+        response = llm.chat(prompt)
+        
+        # 5. 解析响应
+        try:
+            # 尝试清理markdown标记
+            cleaned_response = response.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.startswith("```"):
+                cleaned_response = cleaned_response[3:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            
+            profile_data = json_parser(cleaned_response)
+            
+            return {
+                "success": True,
+                "profile": profile_data
+            }
+        except Exception as e:
+            print(f"Error parsing LLM response: {e}")
+            print(f"Raw response: {response}")
+            return {
+                "success": False,
+                "error": "生成失败，无法解析AI响应",
+                "raw_response": response
+            }
+            
+    except Exception as e:
+        print(f"Error in generate_digital_twin_profile: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/user/digital-twin")
 async def save_digital_twin(request: Request):
     """保存/更新用户的数字孪生 agent"""
@@ -1775,17 +1959,17 @@ async def neural_match(request: Request):
         preset_templates = PresetAgents.get_preset_templates()
         
         # 构建用户 agent 的 profile（用于匹配计算）
-        user_profile = {
-            "interests": digital_twin.get('extracted_profile', {}).get('interests', []),
-            "mbti": digital_twin.get('extracted_profile', {}).get('mbti', ''),
-            "social_goals": digital_twin.get('extracted_profile', {}).get('social_goals', []),
-            "personality": digital_twin.get('extracted_profile', {}).get('personality', '')
-        }
+        # 优先使用 personality 字段 (新版结构)
+        personality = digital_twin.get('personality', {})
+        generated_traits = digital_twin.get('generated_profile', {}).get('core_traits', {})
+        extracted_profile = digital_twin.get('extracted_profile', {})
         
-        # 如果没有提取的 profile，尝试从 agent_info 中获取
-        if not user_profile['interests']:
-            # 尝试从其他字段获取
-            pass
+        user_profile = {
+            "mbti": personality.get('mbti') or generated_traits.get('mbti') or extracted_profile.get('mbti', ''),
+            "interests": extracted_profile.get('interests', []) or personality.get('values', []) or generated_traits.get('values', []),
+            "social_goals": extracted_profile.get('social_goals', []) or personality.get('values', []) or generated_traits.get('values', []),
+            "personality": personality.get('big_five') or generated_traits.get('big_five') or extracted_profile.get('personality', '')
+        }
         
         # 计算匹配度
         matches = []
@@ -1864,15 +2048,15 @@ def calculate_simple_compatibility(profile1: dict, profile2: dict) -> float:
             same_dims = sum(1 for i in range(min(len(mbti1), len(mbti2))) if mbti1[i] == mbti2[i])
             if same_dims >= 3:
                 mbti_score = 0.7
-            elif same_dims >= 2:
-                mbti_score = 0.6
-            else:
+            elif same_dims == 2:
                 mbti_score = 0.5
+            else:
+                mbti_score = 0.3
     else:
         mbti_score = 0.5
     scores.append(('mbti', mbti_score, 0.3))
     
-    # 3. 社交目标匹配度 (30%)
+    # 3. 社交目标/价值观兼容度 (30%)
     goals1 = set(profile1.get('social_goals', []))
     goals2 = set(profile2.get('social_goals', []))
     if goals1 and goals2:
@@ -1883,9 +2067,15 @@ def calculate_simple_compatibility(profile1: dict, profile2: dict) -> float:
         goals_score = 0.5
     scores.append(('goals', goals_score, 0.3))
     
-    # 加权平均
-    overall = sum(score * weight for _, score, weight in scores)
-    return overall
+    # 计算加权总分
+    total_score = sum(score * weight for _, score, weight in scores)
+    
+    # 添加微小的随机扰动 (±3%)，避免大量相同的分数
+    import random
+    jitter = random.uniform(-0.03, 0.03)
+    final_score = max(0.1, min(0.99, total_score + jitter))
+    
+    return final_score
 
 def get_avatar_color(preset_id: str) -> str:
     """根据预设ID返回头像颜色类"""

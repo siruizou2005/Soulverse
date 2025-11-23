@@ -63,6 +63,16 @@ export const api = {
     return response.json();
   },
 
+  async generateDigitalTwinProfile(data) {
+    const response = await fetch(`${API_BASE}/generate-digital-twin-profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(data)
+    });
+    return response.json();
+  },
+
   async getDigitalTwin() {
     const response = await fetch(`${API_BASE}/user/digital-twin`, {
       credentials: 'include'
