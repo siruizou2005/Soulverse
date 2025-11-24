@@ -134,6 +134,23 @@ export default function CreationWizard({ onClose, onComplete }) {
 
     setLoading(true);
     try {
+      // 获取当前用户信息，用于生成agent名称
+      let displayName = wechatName;
+      if (!displayName) {
+        try {
+          const userResult = await api.getCurrentUser();
+          if (userResult.success && userResult.user) {
+            displayName = userResult.user.username || userResult.user.user_id;
+          }
+        } catch (error) {
+          console.warn('Failed to get user info:', error);
+        }
+      }
+      // 如果还是没有，使用默认格式
+      if (!displayName) {
+        displayName = 'User_001';
+      }
+
       // 1. 使用生成的人格数据创建用户Agent
       const userId = `user_${Date.now()}`;
       const role_code = `digital_twin_${userId}`;
@@ -141,8 +158,8 @@ export default function CreationWizard({ onClose, onComplete }) {
       // 构建Agent信息 - 符合UI组件期望的格式
       const agentInfo = {
         role_code: role_code,
-        nickname: wechatName || 'My Digital Twin',
-        role_name: wechatName || 'My Digital Twin',
+        nickname: displayName,
+        role_name: displayName,
         location: `MBTI: ${generatedProfile.core_traits.mbti}`,
         profile: `基于 ${generatedProfile.core_traits.mbti} 人格构建的数字孪生`,
         personality: generatedProfile.core_traits,

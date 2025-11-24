@@ -1,6 +1,44 @@
+import { useState, useEffect } from 'react';
 import { Sparkles, Globe, MessageSquare, User } from 'lucide-react';
+import { api } from '../services/api';
 
 export default function NeuralMatching({ matchedTwins = [], randomTwins = [], onToggleAgent, onStartChat, chatStarted = false }) {
+  const [userDisplayName, setUserDisplayName] = useState('User_001');
+
+  useEffect(() => {
+    loadUserInfo();
+  }, []);
+
+  const loadUserInfo = async () => {
+    try {
+      // 先尝试获取数字孪生信息
+      const twinResult = await api.getDigitalTwin();
+      if (twinResult.success && twinResult.agent_info) {
+        const agentInfo = twinResult.agent_info;
+        // 优先级：nickname > role_name，如果nickname是"My Digital Twin"则尝试获取username
+        let displayName = agentInfo.nickname || agentInfo.role_name;
+        if (displayName === 'My Digital Twin') {
+          // 如果nickname是默认值，尝试获取用户名
+          const userResult = await api.getCurrentUser();
+          if (userResult.success && userResult.user && userResult.user.username) {
+            displayName = userResult.user.username;
+          } else {
+            displayName = agentInfo.role_name || 'User_001';
+          }
+        }
+        setUserDisplayName(displayName || 'User_001');
+        return;
+      }
+      
+      // 如果没有数字孪生，尝试获取当前用户信息
+      const userResult = await api.getCurrentUser();
+      if (userResult.success && userResult.user) {
+        setUserDisplayName(userResult.user.username || userResult.user.user_id || 'User_001');
+      }
+    } catch (error) {
+      console.error('Error loading user info:', error);
+    }
+  };
 
   return (
     <div className="w-80 h-full bg-slate-950/80 backdrop-blur-md border-r border-slate-800 z-20 flex flex-col transform transition-transform duration-300">
@@ -41,7 +79,7 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                   </div>
                 </div>
                 {/* Interaction Bar */}
-                <div className={`mt-3 flex gap-2 transition-opacity ${twin.disabled || chatStarted ? 'hidden' : 'opacity-0 group-hover:opacity-100'}`}>
+                <div className={`mt-3 flex gap-2 transition-opacity ${twin.disabled || chatStarted ? 'hidden' : 'opacity-100'}`}>
                   <button
                     className="flex-1 py-1 text-xs bg-cyan-500/20 text-cyan-300 rounded hover:bg-cyan-500/40"
                     onClick={(e) => {
@@ -50,9 +88,6 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                     }}
                   >
                     私密对话
-                  </button>
-                  <button className="px-2 py-1 text-xs bg-slate-700 rounded hover:bg-slate-600">
-                    <MessageSquare className="w-3 h-3" />
                   </button>
                 </div>
               </div>
@@ -95,7 +130,7 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
             <User className="w-4 h-4 text-black" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-bold">User_001</div>
+            <div className="text-sm font-bold">{userDisplayName}</div>
             <div className="text-xs text-cyan-500 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></span>
               链接稳定
