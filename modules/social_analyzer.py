@@ -195,7 +195,8 @@ class SocialAnalyzer:
         interaction_lengths = []
         
         # 排除的记录类型（这些不应该被统计为互动或移动）
-        excluded_types = ["user_input_placeholder", "user_input", "goal setting", "plan", "npc", "enviroment"]
+        # 注意：user_input 现在被包含在互动统计中，以支持1对1聊天模式
+        excluded_types = ["user_input_placeholder", "goal setting", "plan", "npc", "enviroment"]
         
         for record in records:
             act_type = record.get("act_type", record.get("type", ""))
@@ -204,7 +205,8 @@ class SocialAnalyzer:
             if act_type in excluded_types:
                 continue
             
-            if act_type in ["single", "multi"]:
+            # 统计互动（包括single, multi, 和 user_input）
+            if act_type in ["single", "multi", "user_input"]:
                 stats["total_interactions"] += 1
                 group = record.get("group", [])
                 
@@ -353,42 +355,45 @@ class SocialAnalyzer:
         return time_slots
     
     def _generate_behavior_insights(self,
-                                   agent_code: str,
-                                   agent_profile: Dict[str, Any],
-                                   stats: Dict[str, Any],
-                                   patterns: Dict[str, Any],
-                                   locations: Dict[str, int],
-                                   records: List[Dict[str, Any]]) -> Dict[str, Any]:
+                               agent_code: str,
+                               agent_profile: Dict[str, Any],
+                               stats: Dict[str, Any],
+                               patterns: Dict[str, Any],
+                               locations: Dict[str, int],
+                               records: List[Dict[str, Any]]) -> Dict[str, Any]:
         """使用AI生成行为特点分析"""
         if not self.llm:
             # 如果没有LLM，返回基础分析
             return self._generate_basic_insights(stats, patterns, locations)
         
         try:
+            # 从agent_profile中提取MBTI（支持多种格式）
+            mbti = agent_profile.get('mbti', '未知')
+            if mbti == '未知' and 'core_traits' in agent_profile:
+                mbti = agent_profile['core_traits'].get('mbti', '未知')
+            
             # 构建分析提示
             profile_summary = f"""
-            Agent信息：
-            - 兴趣：{', '.join(agent_profile.get('interests', []))}
-            - MBTI：{agent_profile.get('mbti', '未知')}
-            - 性格：{agent_profile.get('personality', '未知')}
-            - 社交目标：{', '.join(agent_profile.get('social_goals', []))}
-            """
-            
+        Agent信息：
+        - 兴趣：{', '.join(agent_profile.get('interests', []))}
+        - MBTI：{mbti}
+        - 性格：{agent_profile.get('personality', '未知')}
+        - 社交目标：{', '.join(agent_profile.get('social_goals', []))}
+        """
+        
             behavior_summary = f"""
-            行为统计：
-            - 总互动次数：{stats.get('total_interactions', 0)}
-            - 发起互动：{stats.get('initiated_interactions', 0)}
-            - 接收互动：{stats.get('received_interactions', 0)}
-            - 接触的Agent数量：{stats.get('unique_contacts_count', 0)}
-            - 移动次数：{stats.get('total_movements', 0)}
-            - 最活跃位置：{stats.get('most_active_location', '未知')}
-            
-            互动模式：
-            - 群体互动偏好：{patterns.get('prefers_group', 0):.1%}
-            - 一对一互动偏好：{patterns.get('prefers_one_on_one', 0):.1%}
-            - 主动发起率：{patterns.get('initiation_rate', 0):.1%}
-            """
-            
+        行为统计：
+        - 总互动次数：{stats.get('total_interactions', 0)}
+        - 发起互动：{stats.get('initiated_interactions', 0)}
+        - 接收互动：{stats.get('received_interactions', 0)}
+        - 接触的Agent数量：{stats.get('unique_contacts_count', 0)}
+        
+        互动模式：
+        - 群体互动偏好：{patterns.get('prefers_group', 0):.1%}
+        - 一对一互动偏好：{patterns.get('prefers_one_on_one', 0):.1%}
+        - 主动发起率：{patterns.get('initiation_rate', 0):.1%}
+        """
+        
             prompt = f"""基于以下Agent的profile和行为数据，生成一份详细的社交行为特点分析报告。
 
 {profile_summary}
@@ -398,14 +403,13 @@ class SocialAnalyzer:
 请用中文生成分析报告，包括：
 1. 社交活跃度评估
 2. 互动风格特点（主动/被动，群体/一对一偏好）
-3. 位置偏好分析
-4. 社交目标达成情况
-5. 个性特点在社交中的体现
+3. 社交目标达成情况
+4. 个性特点在社交中的体现
 
-要求：分析要深入、客观，字数在200-300字左右。"""
-            
+要求：分析要深入、客观，字数在200-300字左右。注意：不要提及位置、移动等信息。"""
+        
             response = self.llm.chat(prompt)
-            
+        
             # 解析响应
             insights = {
                 "analysis": response.strip(),
@@ -413,9 +417,9 @@ class SocialAnalyzer:
                 "interaction_style": self._assess_interaction_style(patterns),
                 "location_preference": max(locations.items(), key=lambda x: x[1])[0] if locations else "无数据"
             }
-            
+        
             return insights
-            
+        
         except Exception as e:
             print(f"Error generating behavior insights: {e}")
             return self._generate_basic_insights(stats, patterns, locations)

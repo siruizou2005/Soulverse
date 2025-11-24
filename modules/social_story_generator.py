@@ -214,7 +214,8 @@ class SocialStoryGenerator:
         }
         
         # 排除的记录类型（这些不应该被统计为互动或移动）
-        excluded_types = ["user_input_placeholder", "user_input", "goal setting", "plan", "npc", "enviroment"]
+        # 注意：user_input 现在被包含在互动统计中，以支持1对1聊天模式
+        excluded_types = ["user_input_placeholder", "goal setting", "plan", "npc", "enviroment"]
         
         for record in records:
             act_type = record.get("act_type", record.get("type", ""))
@@ -223,7 +224,8 @@ class SocialStoryGenerator:
             if act_type in excluded_types:
                 continue
             
-            if act_type in ["single", "multi"]:
+            # 统计互动（包括single, multi, 和 user_input）
+            if act_type in ["single", "multi", "user_input"]:
                 stats["total_interactions"] += 1
                 # 记录互动对象
                 group = record.get("group", [])

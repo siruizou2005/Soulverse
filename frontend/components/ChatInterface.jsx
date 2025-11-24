@@ -240,9 +240,27 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
     }));
   };
 
-  const handleClearMessages = () => {
-    if (window.confirm('确定要清除所有聊天消息吗？')) {
-      setMessages([]);
+  const handleClearMessages = async () => {
+    if (window.confirm('确定要清除所有聊天消息吗？这将完全重置对话历史。')) {
+      try {
+        const response = await fetch('/api/clear-chat-history', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          setMessages([]);
+          console.log('Chat history cleared successfully');
+        } else {
+          console.error('Failed to clear chat history');
+          alert('清除历史失败，请重试');
+        }
+      } catch (error) {
+        console.error('Error clearing chat history:', error);
+        alert('清除历史出错');
+      }
     }
   };
 
@@ -414,7 +432,50 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
       </main>
 
       {/* 底部输入区域 */}
-      <div className="p-6 border-t border-white/5">
+      <div className="p-6 border-t border-white/5 relative">
+        {/* AI建议选项卡片 - 绝对定位在按钮上方 */}
+        {aiSuggestions && aiSuggestions.length > 0 && (
+          <div className="absolute bottom-24 left-6 z-20 w-96 bg-slate-900/95 backdrop-blur-md border border-purple-500/30 rounded-xl p-4 shadow-[0_0_30px_rgba(168,85,247,0.15)] animate-in slide-in-from-bottom-2 fade-in duration-200">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-purple-300 flex items-center gap-2">
+                <Bot className="w-4 h-4" />
+                ✨ AI建议 - 选择一个回复
+              </h3>
+              <button
+                onClick={handleCloseSuggestions}
+                className="text-slate-400 hover:text-white transition-colors"
+                title="关闭建议"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              {aiSuggestions.map((option, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSelectSuggestion(typeof option.text === 'object' ? option.text.speech : option.text)}
+                  className="w-full text-left p-3 bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-purple-500/50 rounded-lg transition-all group"
+                >
+                  <div className="flex items-start gap-2 mb-1">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${option.style === 'aggressive'
+                      ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                      : option.style === 'balanced'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                        : 'bg-green-500/20 text-green-300 border border-green-500/40'
+                      }`}>
+                      {option.name}
+                    </span>
+                    <span className="text-xs text-slate-400 flex-1">{option.description}</span>
+                  </div>
+                  <p className="text-sm text-slate-200 group-hover:text-white transition-colors leading-relaxed">
+                    {typeof option.text === 'object' ? option.text.speech : option.text}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {waitingForInput ? (
           <div className="mb-3 px-4 py-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
             <p className="text-sm text-cyan-400">
@@ -429,13 +490,14 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
           </div>
         )}
 
-        {/* AI建议按钮 - 仅在等待输入且用户控制模式下显示 */}
-        {waitingForInput && aiControlEnabled && !aiSuggestions && (
-          <div className="mb-3 flex justify-end">
+        <div className="flex gap-4 items-end">
+          {/* AI建议按钮 - 移至左侧 */}
+          {waitingForInput && aiControlEnabled && (
             <button
               onClick={handleRequestSuggestions}
               disabled={loadingSuggestions}
-              className="px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className={`h-[50px] px-4 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap ${loadingSuggestions ? 'w-[120px]' : 'w-[100px]'
+                }`}
               title="让AI生成三个回复建议"
             >
               {loadingSuggestions ? (
@@ -445,74 +507,30 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
                 </>
               ) : (
                 <>
-                  <Bot className="w-4 h-4" />
+                  <Bot className="w-5 h-5" />
                   <span>AI建议</span>
                 </>
               )}
             </button>
-          </div>
-        )}
+          )}
 
-        {/* AI建议选项卡片 */}
-        {aiSuggestions && aiSuggestions.length > 0 && (
-          <div className="mb-4 bg-slate-900/80 border border-purple-500/30 rounded-xl p-4 shadow-[0_0_30px_rgba(168,85,247,0.15)]">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-purple-300 flex items-center gap-2">
-                <Bot className="w-4 h-4" />
-                ✨ AI建议 - 选择一个回复
-              </h3>
-              <button
-                onClick={handleCloseSuggestions}
-                className="text-slate-400 hover:text-white transition-colors"
-                title="关闭建议"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-2">
-              {aiSuggestions.map((option, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleSelectSuggestion(option.text)}
-                  className="w-full text-left p-3 bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-purple-500/50 rounded-lg transition-all group"
-                >
-                  <div className="flex items-start gap-2 mb-1">
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${option.style === 'aggressive'
-                        ? 'bg-red-500/20 text-red-300 border border-red-500/40'
-                        : option.style === 'balanced'
-                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-                          : 'bg-green-500/20 text-green-300 border border-green-500/40'
-                      }`}>
-                      {option.name}
-                    </span>
-                    <span className="text-xs text-slate-400 flex-1">{option.description}</span>
-                  </div>
-                  <p className="text-sm text-slate-200 group-hover:text-white transition-colors leading-relaxed">
-                    {option.text}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="flex gap-4">
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={waitingForInput ? `为 ${waitingRoleName} 输入消息...` : '等待轮到你的角色发言...'}
             disabled={!waitingForInput}
-            className={`flex-1 bg-slate-900/50 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none resize-none transition-all ${waitingForInput
+            className={`flex-1 bg-slate-900/50 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none resize-none transition-all h-[50px] leading-relaxed custom-scrollbar ${waitingForInput
               ? 'border-cyan-500/50 focus:border-cyan-500'
               : 'border-slate-700 opacity-50 cursor-not-allowed'
               }`}
-            rows={2}
+            style={{ minHeight: '50px', maxHeight: '150px' }}
           />
+
           <button
             onClick={handleSend}
             disabled={!waitingForInput || !inputText.trim() || !ws || ws.readyState !== WebSocket.OPEN}
-            className={`px-6 py-3 font-bold rounded-lg transition-all ${waitingForInput && inputText.trim()
+            className={`h-[50px] px-6 font-bold rounded-lg transition-all ${waitingForInput && inputText.trim()
               ? 'bg-cyan-500 hover:bg-cyan-400 text-black'
               : 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-50'
               }`}

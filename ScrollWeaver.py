@@ -1523,8 +1523,10 @@ class ScrollWeaver():
                 agent = self.server.performers.get(agent_code)
                 agent_profile = {}
                 if agent:
+                    print(f"[Social Report] Retrieving profile for agent: {agent_code}")
                     if hasattr(agent, 'soul_profile') and agent.soul_profile:
                         agent_profile = agent.soul_profile
+                        print(f"[Social Report] Using soul_profile: MBTI={agent_profile.get('mbti', 'NOT FOUND')}")
                     elif hasattr(agent, 'preset_config') and agent.preset_config:
                         agent_profile = {
                             "interests": agent.preset_config.get("interests", []),
@@ -1532,6 +1534,9 @@ class ScrollWeaver():
                             "personality": agent.preset_config.get("personality", ""),
                             "social_goals": agent.preset_config.get("social_goals", [])
                         }
+                        print(f"[Social Report] Using preset_config: MBTI={agent_profile.get('mbti', 'NOT FOUND')}")
+                    else:
+                        print(f"[Social Report] WARNING: No profile found for agent {agent_code}")
                 
                 # 分析Agent行为
                 behavior_analysis = analyzer.analyze_agent_behavior(agent_code, agent_profile)
@@ -1580,8 +1585,6 @@ class ScrollWeaver():
             "## 统计信息",
             f"- 总互动次数: {stats.get('total_interactions', 0)}",
             f"- 接触的Agent数量: {stats.get('unique_contacts_count', 0)}",
-            f"- 移动次数: {stats.get('total_movements', 0)}",
-            f"- 时间范围: {time_range_str}",
             "",
         ]
 

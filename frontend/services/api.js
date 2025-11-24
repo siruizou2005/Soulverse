@@ -165,6 +165,43 @@ export const api = {
       credentials: 'include'
     });
     return response.json();
+  },
+
+  // 动态切换Agent沙盒状态
+  async toggleAgentSandbox(roleCode, enabled, presetId) {
+    const response = await fetch(`${API_BASE}/toggle-agent-sandbox`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        role_code: roleCode,
+        enabled: enabled,
+        preset_id: presetId
+      })
+    });
+    return response.json();
+  },
+
+  // 开启1对1聊天
+  async start1on1Chat(targetRoleCode, presetId) {
+    const response = await fetch(`${API_BASE}/start-1on1-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        target_role_code: targetRoleCode,
+        preset_id: presetId
+      })
+    });
+    return response.json();
+  },
+
+  // 重置沙盒
+  async resetSandbox() {
+    const response = await fetch(`${API_BASE}/reset-sandbox`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    return response.json();
   }
 };
 

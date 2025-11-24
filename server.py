@@ -286,10 +286,22 @@ class ConnectionManager:
                                     self.pending_user_inputs[client_id] = asyncio.Future()
                                 
                                 try:
-                                    user_text = await asyncio.wait_for(
+                                    # 获取用户输入
+                                    user_input_result = await asyncio.wait_for(
                                         self.pending_user_inputs[client_id], 
                                         timeout=None
                                     )
+                                    
+                                    # 解析输入结果（可能是字符串或元组）
+                                    if isinstance(user_input_result, tuple):
+                                        user_text, is_echoed = user_input_result
+                                    else:
+                                        user_text = user_input_result
+                                        is_echoed = False
+                                    
+                                    # 清除Future
+                                    del self.pending_user_inputs[client_id]
+                                    
                                     # 用户输入已收到，用用户输入替换消息内容
                                     if not user_text.strip():
                                         # 空输入，继续等待
@@ -324,24 +336,27 @@ class ConnectionManager:
                                                     print(f"[DEBUG] 已更新记录 {original_uuid} 的 act_type 为 user_input")
                                                     break
 
-                                            # 立即回显用户消息到前端（显示原文）
-                                            # 从user_role_code获取正确的用户名
-                                            user_agent = self.scrollweaver.server.performers.get(user_role_code)
-                                            username = user_agent.nickname if user_agent and hasattr(user_agent, 'nickname') else (user_agent.role_name if user_agent and hasattr(user_agent, 'role_name') else message.get('username', '用户'))
-                                            
-                                            echo_msg = {
-                                                'type': 'role',
-                                                'username': username,
-                                                'text': user_text,
-                                                'is_user': True,
-                                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                                'uuid': original_uuid
-                                            }
-                                            await self.active_connections[client_id].send_json({
-                                                'type': 'message',
-                                                'data': echo_msg
-                                            })
-                                            print(f"[DEBUG] 已立即发送用户消息到前端: {username}: {user_text[:50]}...")
+                                            # 立即回显用户消息到前端（显示原文）- 除非已经回显过
+                                            if not is_echoed:
+                                                # 从user_role_code获取正确的用户名
+                                                user_agent = self.scrollweaver.server.performers.get(user_role_code)
+                                                username = user_agent.nickname if user_agent and hasattr(user_agent, 'nickname') else (user_agent.role_name if user_agent and hasattr(user_agent, 'role_name') else message.get('username', '用户'))
+                                                
+                                                echo_msg = {
+                                                    'type': 'role',
+                                                    'username': username,
+                                                    'text': user_text,
+                                                    'is_user': True,
+                                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                    'uuid': original_uuid
+                                                }
+                                                await self.active_connections[client_id].send_json({
+                                                    'type': 'message',
+                                                    'data': echo_msg
+                                                })
+                                                print(f"[DEBUG] 已立即发送用户消息到前端: {username}: {user_text[:50]}...")
+                                            else:
+                                                print(f"[DEBUG] 跳过回显（消息已在select_auto_option中发送）: {user_text[:50]}...")
 
                                             # 清除future和等待状态（继续推进生成，下一条将是其他Agent响应）
                                             if client_id in self.pending_user_inputs:
@@ -355,11 +370,11 @@ class ConnectionManager:
                                         except Exception as e:
                                             print(f"Error modifying placeholder record {original_uuid}: {e}")
                                             # 如果修改失败，创建新记录（立即显示）
-                                            await self.handle_user_role_input(client_id, user_role_code, user_text, delay_display=False)
+                                            await self.handle_user_role_input(client_id, user_role_code, user_text, delay_display=False, skip_broadcast=is_echoed)
                                             continue
                                     else:
                                         # 如果没有uuid，创建新记录（立即显示）
-                                        await self.handle_user_role_input(client_id, user_role_code, user_text, delay_display=False)
+                                        await self.handle_user_role_input(client_id, user_role_code, user_text, delay_display=False, skip_broadcast=is_echoed)
                                         continue
                                     
                                 except asyncio.CancelledError:
@@ -609,9 +624,10 @@ class ConnectionManager:
             traceback.print_exc()
             return None
     
-    async def handle_user_role_input(self, client_id: str, role_code: str, user_text: str, delay_display: bool = False):
+    async def handle_user_role_input(self, client_id: str, role_code: str, user_text: str, delay_display: bool = False, skip_broadcast: bool = False):
         """处理用户输入作为角色消息（当消息没有uuid时使用）
         如果 delay_display=True，则不立即发送消息到前端，交给generate_story在下条Agent消息前发送
+        如果 skip_broadcast=True，则不向前端发送消息（用于避免重复回显）
         """
         try:
             # 生成record_id
@@ -647,7 +663,7 @@ class ConnectionManager:
             # 若设置延迟显示，则缓存；否则立即发送
             if delay_display:
                 self.pending_display_message[client_id] = message
-            else:
+            elif not skip_broadcast:
                 await self.active_connections[client_id].send_json({
                     'type': 'message',
                     'data': message
@@ -788,7 +804,27 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     if client_id in manager.pending_user_inputs:
                         if not manager.pending_user_inputs[client_id].done():
                             if user_text_incoming:
-                                manager.pending_user_inputs[client_id].set_result(user_text_incoming)
+                                # 获取用户角色信息用于回显
+                                user_role_code = manager.user_selected_roles.get(client_id)
+                                if user_role_code:
+                                    user_agent = manager.scrollweaver.server.performers.get(user_role_code)
+                                    username = user_agent.nickname if user_agent and hasattr(user_agent, 'nickname') else (user_agent.role_name if user_agent and hasattr(user_agent, 'role_name') else '你')
+                                else:
+                                    username = '你'
+                                
+                                # 立即回显消息给前端，确保用户能马上看到自己的回复
+                                await websocket.send_json({
+                                    'type': 'message',
+                                    'data': {
+                                        'username': username,
+                                        'text': user_text_incoming,
+                                        'timestamp': datetime.now().strftime("%H:%M"),
+                                        'is_user': True
+                                    }
+                                })
+                                
+                                # 设置结果为元组，标记为已回显
+                                manager.pending_user_inputs[client_id].set_result((user_text_incoming, True))
                             else:
                                 # 空输入，提示用户
                                 await websocket.send_json({
@@ -959,8 +995,20 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if not manager.pending_user_inputs[client_id].done():
                             selected_text = message.get('selected_text', '')
                             if selected_text:
-                                # 将选中的选项作为用户输入
-                                manager.pending_user_inputs[client_id].set_result(selected_text)
+                                # 将选中的选项作为用户输入，并标记为已回显
+                                manager.pending_user_inputs[client_id].set_result((selected_text, True))
+                                
+                                # 立即回显消息给前端，确保用户能马上看到自己的回复
+                                await websocket.send_json({
+                                    'type': 'message',
+                                    'data': {
+                                        'username': '你',  # 或者使用实际的角色名
+                                        'text': selected_text,
+                                        'timestamp': datetime.now().strftime("%H:%M"),
+                                        'is_user': True
+                                    }
+                                })
+                                
                                 await websocket.send_json({
                                     'type': 'auto_complete_success',
                                     'data': {'message': '已选择AI生成的行动'}
@@ -1340,6 +1388,24 @@ async def add_preset_npc(request: Request):
         # 重置生成器初始化标志，下次调用时会重新初始化
         manager.generator_initialized = False
         
+        # 确保用户Agent仍在沙盒中
+        user_id = get_user_id_from_session(request)
+        if user_id:
+            user_role_code = manager.user_agents.get(user_id)
+            if user_role_code and user_role_code not in manager.scrollweaver.server.role_codes:
+                print(f"[Add NPC] Warning: User agent {user_role_code} missing from sandbox, restoring...")
+                # 尝试恢复用户Agent
+                user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+                if os.path.exists(user_file):
+                    user_data = load_json_file(user_file)
+                    digital_twin = user_data.get('digital_twin')
+                    if digital_twin:
+                        manager.scrollweaver.server.add_user_agent(
+                            user_id=user_id,
+                            role_code=digital_twin['role_code']
+                        )
+                        print(f"[Add NPC] Restored user agent {digital_twin['role_code']}")
+        
         return {
             "success": True,
             "agent_info": {
@@ -1357,6 +1423,353 @@ async def add_preset_npc(request: Request):
         }
     except Exception as e:
         print(f"Error adding preset NPC: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/toggle-agent-sandbox")
+async def toggle_agent_sandbox(request: Request):
+    """动态移除/添加Agent到沙盒"""
+    try:
+        data = await request.json()
+        role_code = data.get('role_code')
+        enabled = data.get('enabled')
+        preset_id = data.get('preset_id') # Required for re-enabling
+        
+        if not role_code:
+            raise HTTPException(status_code=400, detail="role_code is required")
+            
+        server = manager.scrollweaver.server
+        
+        if not enabled:
+            # 移除 Agent
+            if role_code in server.role_codes:
+                server.role_codes.remove(role_code)
+            if role_code in server.performers:
+                del server.performers[role_code]
+            # 清除该agent的对话历史
+            if hasattr(server, 'history_manager') and server.history_manager:
+                # 清除与该agent相关的历史记录
+                pass  # history_manager可能没有直接的删除方法，但移除后不会再出现在对话中
+            print(f"[Toggle] Removed agent {role_code} from sandbox")
+        else:
+            # 添加 Agent
+            # 如果已经在沙盒中，忽略
+            if role_code in server.role_codes:
+                return {"success": True, "message": "Agent already in sandbox"}
+                
+            # 如果不在，需要重新添加
+            if preset_id:
+                preset_template = PresetAgents.get_preset_by_id(preset_id)
+                if preset_template:
+                    server.add_npc_agent(
+                        role_code=role_code,
+                        role_name=preset_template["name"],
+                        preset_id=preset_id
+                    )
+                    print(f"[Toggle] Re-added agent {role_code} to sandbox")
+                else:
+                    raise HTTPException(status_code=404, detail=f"Preset {preset_id} not found")
+            else:
+                 raise HTTPException(status_code=400, detail="preset_id is required to enable agent")
+                 
+        # 关键修复：重置generator标志并停止活跃任务
+        print(f"[Toggle] Agent list modified, resetting generator")
+        manager.generator_initialized = False
+        
+        # 确保用户Agent仍在沙盒中
+        user_id = get_user_id_from_session(request)
+        if user_id:
+            user_role_code = manager.user_agents.get(user_id)
+            if user_role_code and user_role_code not in server.role_codes:
+                print(f"[Toggle] Warning: User agent {user_role_code} missing from sandbox, restoring...")
+                # 尝试恢复用户Agent
+                user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+                if os.path.exists(user_file):
+                    user_data = load_json_file(user_file)
+                    digital_twin = user_data.get('digital_twin')
+                    if digital_twin:
+                        manager.scrollweaver.server.add_user_agent(
+                            user_id=user_id,
+                            role_code=digital_twin['role_code']
+                        )
+                        print(f"[Toggle] Restored user agent {digital_twin['role_code']}")
+
+        # 停止所有活跃的story任务（让用户重新开始对话）
+        active_clients = list(manager.story_tasks.keys())
+        for client_id in active_clients:
+            manager.stop_story(client_id)
+            print(f"[Toggle] Stopped story task for client {client_id}")
+        
+        # 通知所有连接的客户端需要重新开始
+        for client_id in active_clients:
+            if client_id in manager.active_connections:
+                try:
+                    await manager.active_connections[client_id].send_json({
+                        'type': 'agents_updated',
+                        'data': {'message': 'Agent列表已更新，请重新开始对话'}
+                    })
+                except Exception as e:
+                    print(f"[Toggle] Error notifying client {client_id}: {e}")
+        
+        return {"success": True, "role_code": role_code, "enabled": enabled, "stopped_tasks": len(active_clients)}
+    except Exception as e:
+        print(f"Error toggling agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/reset-sandbox")
+async def reset_sandbox(request: Request):
+    """重置沙盒到默认状态（用于从聊天返回匹配页）"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+            
+        print(f"\n[Reset Sandbox] 重置沙盒for user {user_id}")
+        
+        # 重新初始化 ScrollWeaver 为默认沙盒配置
+        preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                  'experiment_presets/soulverse_sandbox.json')
+        
+        manager.scrollweaver = ScrollWeaver(
+            preset_path=preset_path,
+            world_llm_name=config["world_llm_name"],
+            role_llm_name=config["role_llm_name"],
+            embedding_name=config["embedding_model_name"]
+        )
+        
+        # 恢复用户Agent
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if os.path.exists(user_file):
+            user_data = load_json_file(user_file)
+            digital_twin = user_data.get('digital_twin')
+            if digital_twin:
+                manager.scrollweaver.server.add_user_agent(
+                    user_id=user_id,
+                    role_code=digital_twin['role_code']
+                )
+                print(f"[Reset Sandbox] Restored user agent {digital_twin['role_code']}")
+        
+        # 重置生成器标志（agents会由前端重新添加，generator会在下次对话时初始化）
+        manager.generator_initialized = False
+            
+        print(f"[Reset Sandbox] ScrollWeaver 已重新初始化")
+        
+        return {"success": True, "message": "Sandbox reset successfully"}
+        
+    except Exception as e:
+        print(f"Error resetting sandbox: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/clear-chat-history")
+async def clear_chat_history(request: Request):
+    """清除当前对话历史（真正的重置）"""
+    try:
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+            
+        print(f"\n[Clear History] Clearing chat history for user {user_id}")
+        
+        # 1. 清除历史记录
+        if hasattr(manager.scrollweaver, 'history_manager'):
+            manager.scrollweaver.history_manager.detailed_history = []
+            manager.scrollweaver.history_manager.history = []
+            print("[Clear History] History manager cleared")
+            
+        # 2. 重置轮次和事件
+        manager.scrollweaver.cur_round = 0
+        manager.scrollweaver.event_history = []
+        
+        # 3. 重置生成器标志，强制重新初始化
+        manager.generator_initialized = False
+        
+        # 确保用户Agent仍在沙盒中
+        user_role_code = manager.user_agents.get(user_id)
+        if user_role_code and user_role_code not in manager.scrollweaver.server.role_codes:
+            print(f"[Clear History] Warning: User agent {user_role_code} missing from sandbox, restoring...")
+            # 尝试恢复用户Agent
+            user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+            if os.path.exists(user_file):
+                user_data = load_json_file(user_file)
+                digital_twin = user_data.get('digital_twin')
+                if digital_twin:
+                    manager.scrollweaver.server.add_user_agent(
+                        user_id=user_id,
+                        role_code=digital_twin['role_code']
+                    )
+                    print(f"[Clear History] Restored user agent {digital_twin['role_code']}")
+        
+        # 4. 停止并重启活跃任务，刷新上下文
+        active_clients = list(manager.story_tasks.keys())
+        for client_id in active_clients:
+            manager.stop_story(client_id)
+            print(f"[Clear History] Stopped story task for client {client_id}")
+            
+        # 5. 自动重启任务（如果连接还在）
+        for client_id in active_clients:
+            if client_id in manager.active_connections:
+                try:
+                    await manager.start_story(client_id)
+                    print(f"[Clear History] Restarted story for client {client_id}")
+                    
+                    # 通知前端已清除
+                    await manager.active_connections[client_id].send_json({
+                        'type': 'info',
+                        'data': {'message': '对话历史已完全重置'}
+                    })
+                except Exception as e:
+                    print(f"[Clear History] Error restarting story for client {client_id}: {e}")
+        
+        return {"success": True, "message": "Chat history cleared successfully"}
+        
+    except Exception as e:
+        print(f"Error clearing chat history: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/start-1on1-chat")
+async def start_1on1_chat(request: Request):
+    """开启1对1聊天模式"""
+    try:
+        data = await request.json()
+        target_role_code = data.get('target_role_code')
+        preset_id = data.get('preset_id')
+        
+        if not target_role_code or not preset_id:
+            raise HTTPException(status_code=400, detail="target_role_code and preset_id are required")
+            
+        user_id = get_user_id_from_session(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        print(f"\n{'='*60}")
+        print(f"[1on1] Starting 1-on-1 chat mode")
+        print(f"[1on1] User ID: {user_id}")
+        print(f"[1on1] Target role: {target_role_code}")
+        print(f"[1on1] Preset ID: {preset_id}")
+            
+        # 1. 直接使用 manager.user_agents 获取用户的 role_code
+        # 这个映射在restore_user_agent时已经建立
+        user_role_code = manager.user_agents.get(user_id)
+        
+        if not user_role_code:
+            print(f"[1on1] Error: user {user_id} not found in user_agents mapping")
+            print(f"[1on1] Current user_agents: {manager.user_agents}")
+            raise HTTPException(status_code=400, detail="请先恢复用户Agent到沙盒")
+        
+        print(f"[1on1] User role code: {user_role_code}")
+        
+        # 记录旧沙盒状态
+        old_agent_count = len(manager.scrollweaver.server.role_codes) if manager.scrollweaver else 0
+        old_agents = list(manager.scrollweaver.server.role_codes) if manager.scrollweaver else []
+        print(f"[1on1] Old sandbox had {old_agent_count} agents: {old_agents}")
+
+        # 2. 重新初始化 ScrollWeaver 为 1on1 模式
+        # 使用完整的 preset 配置文件
+        preset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                  'experiment_presets/soulverse_1on1.json')
+        
+        print(f"[1on1] Reinitializing ScrollWeaver with preset: {preset_path}")
+        
+        # 重新初始化 ScrollWeaver - 这会创建一个全新的空沙盒
+        manager.scrollweaver = ScrollWeaver(preset_path=preset_path,
+                world_llm_name=config["world_llm_name"],
+                role_llm_name=config["role_llm_name"],
+                embedding_name=config["embedding_model_name"])
+        
+        # 验证沙盒已清空
+        initial_agent_count = len(manager.scrollweaver.server.role_codes)
+        print(f"[1on1] After reinitialization: {initial_agent_count} agents in sandbox")
+        if initial_agent_count > 0:
+            print(f"[1on1] WARNING: Sandbox not empty! Contains: {list(manager.scrollweaver.server.role_codes)}")
+                
+        # 3. 添加用户 Agent
+        # 需要从数据库重新加载用户Agent数据
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if os.path.exists(user_file):
+            user_data = load_json_file(user_file)
+            digital_twin = user_data.get('digital_twin')
+            if digital_twin:
+                print(f"[1on1] Adding user agent: {digital_twin['role_code']}")
+                
+                # 提取soul_profile from digital_twin
+                soul_profile = None
+                if 'generated_profile' in digital_twin and digital_twin['generated_profile']:
+                    soul_profile = digital_twin['generated_profile']
+                    print(f"[1on1] Using generated_profile with MBTI: {soul_profile.get('core_traits', {}).get('mbti', 'NOT FOUND')}")
+                elif 'personality' in digital_twin and digital_twin['personality']:
+                    # 如果没有generated_profile，使用personality字段
+                    soul_profile = {'core_traits': digital_twin['personality']}
+                    print(f"[1on1] Using personality with MBTI: {soul_profile.get('core_traits', {}).get('mbti', 'NOT FOUND')}")
+                
+                # 使用正确的 add_user_agent 参数签名，包括soul_profile
+                manager.scrollweaver.server.add_user_agent(
+                    user_id=user_id,
+                    role_code=digital_twin['role_code'],
+                    soul_profile=soul_profile
+                )
+                print(f"[1on1] User agent added successfully")
+        
+        # 4. 添加目标 NPC Agent
+        preset_template = PresetAgents.get_preset_by_id(preset_id)
+        if preset_template:
+            print(f"[1on1] Adding NPC agent: {target_role_code} ({preset_template['name']})")
+            manager.scrollweaver.server.add_npc_agent(
+                role_code=target_role_code,
+                role_name=preset_template["name"],
+                preset_id=preset_id
+            )
+            print(f"[1on1] NPC agent added successfully")
+        else:
+            raise HTTPException(status_code=404, detail=f"Preset {preset_id} not found")
+        
+        # 验证沙盒中只有2个agent
+        agent_count = len(manager.scrollweaver.server.role_codes)
+        agents_list = list(manager.scrollweaver.server.role_codes)
+        print(f"[1on1] Final sandbox state: {agent_count} agents")
+        print(f"[1on1] Agents: {agents_list}")
+        
+        if agent_count != 2:
+            print(f"[1on1] ERROR: Expected exactly 2 agents but found {agent_count}!")
+            print(f"[1on1] This indicates a problem with sandbox initialization")
+            # Don't raise an error, but log it prominently
+        
+        # 关键：重置generator标志
+        manager.generator_initialized = False
+        
+        # 停止所有活跃的story任务
+        active_clients = list(manager.story_tasks.keys())
+        for client_id in active_clients:
+            manager.stop_story(client_id)
+            print(f"[1on1] Stopped story task for client {client_id}")
+        
+        # 自动重启对话（因为1on1是主动操作，应该立即生效）
+        for client_id in active_clients:
+            if client_id in manager.active_connections:
+                try:
+                    # 自动开始新的1on1对话
+                    await manager.start_story(client_id)
+                    print(f"[1on1] Auto-restarted story for client {client_id}")
+                    
+                    # 通知客户端已进入1on1模式
+                    await manager.active_connections[client_id].send_json({
+                        'type': 'info',
+                        'data': {'message': f'已进入1对1私密对话模式，当前对话人数：{agent_count}'}
+                    })
+                except Exception as e:
+                    print(f"[1on1] Error restarting story for client {client_id}: {e}")
+        
+        print(f"[1on1] 1-on-1 chat mode activated successfully")
+        print(f"{'='*60}\n")
+        
+        return {"success": True, "message": "Entered 1-on-1 chat mode", "agent_count": agent_count, "restarted_tasks": len(active_clients)}
+        
+    except Exception as e:
+        print(f"Error starting 1-on-1 chat: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

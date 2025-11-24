@@ -1,6 +1,6 @@
 import { Sparkles, Globe, MessageSquare, User } from 'lucide-react';
 
-export default function NeuralMatching({ matchedTwins = [], randomTwins = [], onAgentSelect }) {
+export default function NeuralMatching({ matchedTwins = [], randomTwins = [], onToggleAgent, onStartChat, chatStarted = false }) {
 
   return (
     <div className="w-80 h-full bg-slate-950/80 backdrop-blur-md border-r border-slate-800 z-20 flex flex-col transform transition-transform duration-300">
@@ -9,6 +9,9 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
           神经元匹配
         </h2>
         <p className="text-xs text-slate-500 mt-1">基于你的数字指纹</p>
+        {chatStarted && (
+          <p className="text-xs text-amber-500 mt-2">⚠️ 聊天进行中 - Toggle已禁用</p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
@@ -21,8 +24,9 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
             {matchedTwins.map(twin => (
               <div
                 key={twin.id}
-                className="group p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-800 transition-all cursor-pointer"
-                onClick={() => onAgentSelect && onAgentSelect(twin)}
+                className={`group p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-800 transition-all ${chatStarted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                  } ${twin.disabled ? 'opacity-40 grayscale' : 'opacity-100'}`}
+                onClick={() => !chatStarted && onToggleAgent && onToggleAgent(twin)}
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-full ${twin.avatar} flex items-center justify-center text-xs font-bold shadow-lg`}>
@@ -37,9 +41,15 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                   </div>
                 </div>
                 {/* Interaction Bar */}
-                <div className="mt-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="flex-1 py-1 text-xs bg-cyan-500/20 text-cyan-300 rounded hover:bg-cyan-500/40">
-                    连接
+                <div className={`mt-3 flex gap-2 transition-opacity ${twin.disabled || chatStarted ? 'hidden' : 'opacity-0 group-hover:opacity-100'}`}>
+                  <button
+                    className="flex-1 py-1 text-xs bg-cyan-500/20 text-cyan-300 rounded hover:bg-cyan-500/40"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartChat && onStartChat(twin);
+                    }}
+                  >
+                    私密对话
                   </button>
                   <button className="px-2 py-1 text-xs bg-slate-700 rounded hover:bg-slate-600">
                     <MessageSquare className="w-3 h-3" />
@@ -59,8 +69,9 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
             {randomTwins.map(twin => (
               <div
                 key={twin.id}
-                className="p-3 rounded-xl bg-slate-900/50 border border-dashed border-slate-800 hover:border-slate-600 transition-all cursor-pointer opacity-75 hover:opacity-100"
-                onClick={() => onAgentSelect && onAgentSelect(twin)}
+                className={`p-3 rounded-xl bg-slate-900/50 border border-dashed border-slate-800 hover:border-slate-600 transition-all ${chatStarted ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+                  } ${twin.disabled ? 'opacity-30 grayscale' : 'opacity-75 hover:opacity-100'}`}
+                onClick={() => !chatStarted && onToggleAgent && onToggleAgent(twin)}
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-full ${twin.avatar} grayscale group-hover:grayscale-0 flex items-center justify-center text-[10px] font-bold`}>
