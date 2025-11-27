@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ArrowRight, ArrowLeft, Fingerprint, Cpu, User, Zap, Check, Upload, MessageSquare } from 'lucide-react';
+import { X, ArrowRight, ArrowLeft, Fingerprint, Cpu, User, Zap, Check, Upload, MessageSquare, Shield, Heart, ListOrdered } from 'lucide-react';
 import { api } from '../services/api';
-import { MBTI_TYPES, MBTI_QUESTIONS, CORE_QUESTIONS } from '../data/questionnaires';
+import { MBTI_TYPES, MBTI_QUESTIONS, CORE_QUESTIONS, DEFENSE_QUESTIONS, ATTACHMENT_QUESTIONS, VALUES_LIST } from '../data/questionnaires';
 
 export default function CreationWizard({ onClose, onComplete }) {
-  // 步骤: 1=MBTI, 2=核心层(BigFive), 3=风格层(聊天记录), 4=生成中/结果
+  // 步骤: 1=MBTI, 2=核心层(BigFive), 3=细腻层(Defense/Attach/Values), 4=风格层(聊天记录), 5=生成中/结果
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -21,6 +21,15 @@ export default function CreationWizard({ onClose, onComplete }) {
   const [coreAnswers, setCoreAnswers] = useState(new Array(CORE_QUESTIONS.length).fill(null));
   const [currentCoreQuestion, setCurrentCoreQuestion] = useState(0);
 
+  // 细腻层状态 (Phase 2)
+  const [nuancedMode, setNuancedMode] = useState(null); // 'skip' | 'test'
+  const [nuancedSubStep, setNuancedSubStep] = useState(0); // 0=Defense, 1=Attachment, 2=Values
+  const [defenseAnswers, setDefenseAnswers] = useState(new Array(DEFENSE_QUESTIONS.length).fill(null));
+  const [currentDefenseQuestion, setCurrentDefenseQuestion] = useState(0);
+  const [attachmentAnswers, setAttachmentAnswers] = useState(new Array(ATTACHMENT_QUESTIONS.length).fill(null));
+  const [currentAttachmentQuestion, setCurrentAttachmentQuestion] = useState(0);
+  const [valuesOrder, setValuesOrder] = useState(VALUES_LIST);
+
   // 风格层状态
   const [styleMode, setStyleMode] = useState(null); // 'skip' | 'upload'
   const [chatHistory, setChatHistory] = useState('');
@@ -34,6 +43,7 @@ export default function CreationWizard({ onClose, onComplete }) {
   const steps = [
     { title: "人格基石 (MBTI)", icon: <Fingerprint className="w-5 h-5" />, desc: "确定你的 MBTI 类型，构建人格的基础框架。" },
     { title: "核心特质 (Big Five)", icon: <Cpu className="w-5 h-5" />, desc: "通过大五人格测试，深入刻画你的性格维度。" },
+    { title: "深层机制", icon: <Shield className="w-5 h-5" />, desc: "探索防御机制、依恋风格和价值观。" },
     { title: "语言风格", icon: <MessageSquare className="w-5 h-5" />, desc: "上传聊天记录，让数字孪生学习你的表达习惯。" },
     { title: "神经元构建", icon: <Zap className="w-5 h-5" />, desc: "正在生成你的数字孪生..." },
   ];
@@ -77,7 +87,18 @@ export default function CreationWizard({ onClose, onComplete }) {
     } else if (step === 2) {
       setStep(3);
     } else if (step === 3) {
-      setStep(4);
+      // 细腻层逻辑
+      if (nuancedMode === 'test') {
+        if (nuancedSubStep < 2) {
+          setNuancedSubStep(curr => curr + 1);
+        } else {
+          setStep(4);
+        }
+      } else {
+        setStep(4);
+      }
+    } else if (step === 4) {
+      setStep(5);
       await generateProfile();
     }
   };
@@ -106,6 +127,11 @@ export default function CreationWizard({ onClose, onComplete }) {
         mbti_type: selectedMbti,
         mbti_answers: mbtiMode === 'unknown' ? mbtiAnswers : null,
         big_five_answers: coreMode === 'test' ? coreAnswers : null,
+        // 新增 Phase 2 数据
+        defense_answers: nuancedMode === 'test' ? defenseAnswers : null,
+        attachment_answers: nuancedMode === 'test' ? attachmentAnswers : null,
+        values_order: nuancedMode === 'test' ? valuesOrder.map(v => v.text) : null,
+
         chat_history: styleMode === 'upload' ? (chatHistory.length > 50000 ? chatHistory.substring(0, 50000) : chatHistory) : null,
         user_name: wechatName,
         relationship: relationship
@@ -129,13 +155,13 @@ export default function CreationWizard({ onClose, onComplete }) {
         const errorMessage = result.detail || result.error || '未知错误';
         console.error('Generation failed:', result);
         alert('生成失败: ' + errorMessage);
-        setStep(3); // 返回上一步
+        setStep(4); // 返回上一步
       }
     } catch (error) {
       clearInterval(interval);
       console.error('Generation error:', error);
       alert('生成出错: ' + error.message);
-      setStep(3);
+      setStep(4);
     } finally {
       setLoading(false);
     }
@@ -429,6 +455,203 @@ export default function CreationWizard({ onClose, onComplete }) {
     );
   };
 
+  // 渲染细腻层步骤 (Phase 2)
+  const renderNuancedStep = () => {
+    if (!nuancedMode) {
+      return (
+        <div className="grid grid-cols-2 gap-6 h-full">
+          <div
+            onClick={() => setNuancedMode('skip')}
+            className="border border-slate-700 bg-slate-800/50 rounded-xl p-6 cursor-pointer hover:border-slate-500 hover:bg-slate-800 transition-all flex flex-col items-center justify-center gap-4 group"
+          >
+            <div className="w-16 h-16 rounded-full bg-slate-700/30 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <ArrowRight className="w-8 h-8 text-slate-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-white">跳过</h3>
+            <p className="text-slate-400 text-center text-sm">暂不探索深层机制</p>
+          </div>
+          <div
+            onClick={() => setNuancedMode('test')}
+            className="border border-slate-700 bg-slate-800/50 rounded-xl p-6 cursor-pointer hover:border-cyan-500 hover:bg-slate-800 transition-all flex flex-col items-center justify-center gap-4 group"
+          >
+            <div className="w-16 h-16 rounded-full bg-cyan-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <Shield className="w-8 h-8 text-cyan-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-white">深层探索</h3>
+            <p className="text-slate-400 text-center text-sm">防御机制、依恋风格与价值观</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (nuancedMode === 'skip') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center">
+          <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-6">
+            <Check className="w-10 h-10 text-green-400" />
+          </div>
+          <h3 className="text-xl text-white mb-2">已准备好进入下一步</h3>
+          <p className="text-slate-400 max-w-xs">我们将跳过深层机制探索。</p>
+        </div>
+      );
+    }
+
+    // Sub-steps: 0=Defense, 1=Attachment, 2=Values
+    if (nuancedSubStep === 0) {
+      // Defense Mechanism Questions
+      const question = DEFENSE_QUESTIONS[currentDefenseQuestion];
+      return (
+        <div className="flex flex-col h-full">
+          <div className="mb-6">
+            <div className="flex justify-between text-sm text-slate-400 mb-2">
+              <span className="flex items-center gap-2"><Shield className="w-4 h-4" /> 防御机制 {currentDefenseQuestion + 1} / {DEFENSE_QUESTIONS.length}</span>
+              <span>{Math.round(((currentDefenseQuestion + 1) / DEFENSE_QUESTIONS.length) * 100)}%</span>
+            </div>
+            <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+              <div className="h-full bg-purple-500 transition-all duration-300" style={{ width: `${((currentDefenseQuestion + 1) / DEFENSE_QUESTIONS.length) * 100}%` }} />
+            </div>
+          </div>
+
+          <h3 className="text-xl text-white mb-8">{question.text}</h3>
+
+          <div className="space-y-6">
+            <div className="flex justify-between px-2 text-slate-400 text-sm mb-2">
+              <span>非常不同意</span>
+              <span>非常同意</span>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {question.options.map((option, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    const newAnswers = [...defenseAnswers];
+                    newAnswers[currentDefenseQuestion] = { dimension: question.dimension, value: option.value, direction: question.direction };
+                    setDefenseAnswers(newAnswers);
+                    if (currentDefenseQuestion < DEFENSE_QUESTIONS.length - 1) {
+                      setTimeout(() => setCurrentDefenseQuestion(curr => curr + 1), 200);
+                    }
+                  }}
+                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all h-24 ${defenseAnswers[currentDefenseQuestion]?.value === option.value
+                    ? 'bg-purple-500/20 border-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)]'
+                    : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-500'
+                    }`}
+                >
+                  <span className="text-xl font-bold mb-1">{option.value}</span>
+                  <span className="text-xs text-center opacity-70">{option.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-auto flex justify-between pt-4">
+            <button onClick={() => setCurrentDefenseQuestion(curr => Math.max(0, curr - 1))} disabled={currentDefenseQuestion === 0} className="text-slate-500 disabled:opacity-30 hover:text-white">上一题</button>
+          </div>
+        </div>
+      );
+    } else if (nuancedSubStep === 1) {
+      // Attachment Style Questions
+      const question = ATTACHMENT_QUESTIONS[currentAttachmentQuestion];
+      return (
+        <div className="flex flex-col h-full">
+          <div className="mb-6">
+            <div className="flex justify-between text-sm text-slate-400 mb-2">
+              <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> 依恋风格 {currentAttachmentQuestion + 1} / {ATTACHMENT_QUESTIONS.length}</span>
+              <span>{Math.round(((currentAttachmentQuestion + 1) / ATTACHMENT_QUESTIONS.length) * 100)}%</span>
+            </div>
+            <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+              <div className="h-full bg-pink-500 transition-all duration-300" style={{ width: `${((currentAttachmentQuestion + 1) / ATTACHMENT_QUESTIONS.length) * 100}%` }} />
+            </div>
+          </div>
+
+          <h3 className="text-xl text-white mb-8">{question.text}</h3>
+
+          <div className="space-y-6">
+            <div className="flex justify-between px-2 text-slate-400 text-sm mb-2">
+              <span>非常不同意</span>
+              <span>非常同意</span>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {question.options.map((option, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    const newAnswers = [...attachmentAnswers];
+                    newAnswers[currentAttachmentQuestion] = { dimension: question.dimension, value: option.value, direction: question.direction };
+                    setAttachmentAnswers(newAnswers);
+                    if (currentAttachmentQuestion < ATTACHMENT_QUESTIONS.length - 1) {
+                      setTimeout(() => setCurrentAttachmentQuestion(curr => curr + 1), 200);
+                    }
+                  }}
+                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all h-24 ${attachmentAnswers[currentAttachmentQuestion]?.value === option.value
+                    ? 'bg-pink-500/20 border-pink-500 text-white shadow-[0_0_15px_rgba(236,72,153,0.3)]'
+                    : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-500'
+                    }`}
+                >
+                  <span className="text-xl font-bold mb-1">{option.value}</span>
+                  <span className="text-xs text-center opacity-70">{option.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-auto flex justify-between pt-4">
+            <button onClick={() => setCurrentAttachmentQuestion(curr => Math.max(0, curr - 1))} disabled={currentAttachmentQuestion === 0} className="text-slate-500 disabled:opacity-30 hover:text-white">上一题</button>
+          </div>
+        </div>
+      );
+    } else {
+      // Values Sorting
+      const moveItem = (index, direction) => {
+        const newOrder = [...valuesOrder];
+        if (direction === 'up' && index > 0) {
+          [newOrder[index], newOrder[index - 1]] = [newOrder[index - 1], newOrder[index]];
+        } else if (direction === 'down' && index < newOrder.length - 1) {
+          [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+        }
+        setValuesOrder(newOrder);
+      };
+
+      return (
+        <div className="flex flex-col h-full">
+          <div className="mb-4">
+            <h3 className="text-xl text-white mb-2 flex items-center gap-2"><ListOrdered className="w-5 h-5" /> 价值观排序</h3>
+            <p className="text-slate-400 text-sm">请将以下价值观按重要性从高到低排序（点击箭头移动）</p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+            {valuesOrder.map((item, index) => (
+              <div key={item.id} className="flex items-center gap-3 bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-cyan-400 font-bold shrink-0">
+                  {index + 1}
+                </div>
+                <div className="flex-1">
+                  <div className="text-white font-medium">{item.text}</div>
+                  <div className="text-xs text-slate-500">{item.desc}</div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => moveItem(index, 'up')}
+                    disabled={index === 0}
+                    className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => moveItem(index, 'down')}
+                    disabled={index === valuesOrder.length - 1}
+                    className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                  >
+                    ▼
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+  };
+
   // 渲染风格层步骤
   const renderStyleStep = () => {
     if (!styleMode) {
@@ -576,7 +799,6 @@ export default function CreationWizard({ onClose, onComplete }) {
       if (mbtiMode === 'known' && !selectedMbti) return true;
       if (mbtiMode === 'unknown') {
         const answeredCount = mbtiAnswers.filter(a => a).length;
-        // console.log(`MBTI Progress: ${answeredCount}/${MBTI_QUESTIONS.length}`);
         return answeredCount < MBTI_QUESTIONS.length;
       }
     }
@@ -588,6 +810,20 @@ export default function CreationWizard({ onClose, onComplete }) {
       }
     }
     if (step === 3) {
+      if (!nuancedMode) return true;
+      if (nuancedMode === 'test') {
+        if (nuancedSubStep === 0) {
+          const answeredCount = defenseAnswers.filter(a => a).length;
+          return answeredCount < DEFENSE_QUESTIONS.length;
+        }
+        if (nuancedSubStep === 1) {
+          const answeredCount = attachmentAnswers.filter(a => a).length;
+          return answeredCount < ATTACHMENT_QUESTIONS.length;
+        }
+        // Values sorting is always valid
+      }
+    }
+    if (step === 4) {
       if (!styleMode) return true;
       if (styleMode === 'upload' && (!chatHistory || !wechatName)) return true;
     }

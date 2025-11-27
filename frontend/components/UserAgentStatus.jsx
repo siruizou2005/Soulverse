@@ -108,7 +108,7 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 overflow-hidden min-h-0">
           {loading ? (
             <div className="flex items-center justify-center h-full text-slate-400">
               <div className="flex flex-col items-center gap-4">
@@ -117,9 +117,9 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
               </div>
             </div>
           ) : agentInfo ? (
-            <div className="flex flex-col md:flex-row h-full">
+            <div className="flex flex-col md:flex-row h-full min-h-0">
               {/* Left Column: Visuals */}
-              <div className="w-full md:w-5/12 p-8 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-900/50 flex flex-col items-center">
+              <div className="w-full md:w-5/12 p-8 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-900/50 flex flex-col items-center min-h-0">
                 <div className="text-center mb-10">
                   <h3 className="text-4xl font-bold text-white mb-4 tracking-tight">{agentInfo.nickname || agentInfo.role_name}</h3>
                   <div className="inline-block px-6 py-2 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-xl font-bold tracking-widest shadow-[0_0_15px_rgba(6,182,212,0.2)]">
@@ -127,7 +127,7 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
                   </div>
                 </div>
 
-                <div className="flex-1 flex flex-col items-center justify-center w-full min-h-[300px]">
+                <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0">
                   {bigFiveData ? (
                     <PersonalityRadar data={bigFiveData} />
                   ) : (
@@ -135,10 +135,17 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
                   )}
                 </div>
 
-                <div className="w-full mt-8 grid grid-cols-2 gap-4">
+                <div className="w-full mt-8 grid grid-cols-2 gap-4 flex-shrink-0">
                   <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
-                    <div className="text-slate-400 text-xs mb-1">同步率</div>
-                    <div className="text-2xl font-bold text-cyan-400">98.4%</div>
+                    <div className="text-slate-400 text-xs mb-1">
+                      {agentInfo.match !== undefined ? '匹配度' : '同步率'}
+                    </div>
+                    <div className={`text-2xl font-bold ${agentInfo.match !== undefined
+                      ? agentInfo.match >= 70 ? 'text-green-400' : agentInfo.match >= 50 ? 'text-yellow-400' : 'text-orange-400'
+                      : 'text-cyan-400'
+                      }`}>
+                      {agentInfo.match !== undefined ? `${agentInfo.match}%` : '98.4%'}
+                    </div>
                   </div>
                   <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
                     <div className="text-slate-400 text-xs mb-1">状态</div>
@@ -151,7 +158,101 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
               </div>
 
               {/* Right Column: Details */}
-              <div className="w-full md:w-7/12 p-8 space-y-8">
+              <div className="w-full md:w-7/12 overflow-y-auto custom-scrollbar min-h-0">
+                <div className="p-8 space-y-8">
+                {/* Match Breakdown - Only show for matched agents */}
+                {agentInfo.match_breakdown && (
+                  <section>
+                    <h4 className="flex items-center gap-2 text-base font-bold text-white mb-3">
+                      <Brain className="w-4 h-4 text-cyan-400" />
+                      <span>匹配度分析</span>
+                    </h4>
+                    <div className="p-4 rounded-xl bg-slate-800/30 border border-slate-700/50">
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Personality */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400 text-xs">性格共鸣</span>
+                            <span className={`text-xs font-bold ${agentInfo.match_breakdown.personality >= 70 ? 'text-green-400' :
+                                agentInfo.match_breakdown.personality >= 40 ? 'text-yellow-400' : 'text-orange-400'
+                              }`}>
+                              {agentInfo.match_breakdown.personality}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-500 ${agentInfo.match_breakdown.personality >= 70 ? 'bg-green-400' :
+                                  agentInfo.match_breakdown.personality >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
+                                }`}
+                              style={{ width: `${agentInfo.match_breakdown.personality}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Values */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400 text-xs">价值观契合</span>
+                            <span className={`text-xs font-bold ${agentInfo.match_breakdown.values >= 70 ? 'text-green-400' :
+                                agentInfo.match_breakdown.values >= 40 ? 'text-yellow-400' : 'text-orange-400'
+                              }`}>
+                              {agentInfo.match_breakdown.values}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-500 ${agentInfo.match_breakdown.values >= 70 ? 'bg-green-400' :
+                                  agentInfo.match_breakdown.values >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
+                                }`}
+                              style={{ width: `${agentInfo.match_breakdown.values}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Interests */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400 text-xs">兴趣重叠</span>
+                            <span className={`text-xs font-bold ${agentInfo.match_breakdown.interests >= 70 ? 'text-green-400' :
+                                agentInfo.match_breakdown.interests >= 40 ? 'text-yellow-400' : 'text-orange-400'
+                              }`}>
+                              {agentInfo.match_breakdown.interests}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-500 ${agentInfo.match_breakdown.interests >= 70 ? 'bg-green-400' :
+                                  agentInfo.match_breakdown.interests >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
+                                }`}
+                              style={{ width: `${agentInfo.match_breakdown.interests}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Goals */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400 text-xs">社交目标</span>
+                            <span className={`text-xs font-bold ${agentInfo.match_breakdown.goals >= 70 ? 'text-green-400' :
+                                agentInfo.match_breakdown.goals >= 40 ? 'text-yellow-400' : 'text-orange-400'
+                              }`}>
+                              {agentInfo.match_breakdown.goals}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-500 ${agentInfo.match_breakdown.goals >= 70 ? 'bg-green-400' :
+                                  agentInfo.match_breakdown.goals >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
+                                }`}
+                              style={{ width: `${agentInfo.match_breakdown.goals}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
                 {/* Profile */}
                 <section>
                   <h4 className="flex items-center gap-2 text-lg font-bold text-white mb-4">
@@ -241,6 +342,7 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
                       )}
                     </div>
                   </section>
+                </div>
                 </div>
               </div>
             </div>

@@ -1998,6 +1998,12 @@ async def generate_digital_twin_profile(request: Request):
         mbti_type = data.get('mbti_type')
         mbti_answers = data.get('mbti_answers', [])
         big_five_answers = data.get('big_five_answers', [])
+        
+        # 新增 Phase 2 数据
+        defense_answers = data.get('defense_answers', [])
+        attachment_answers = data.get('attachment_answers', [])
+        values_order = data.get('values_order', [])
+        
         chat_history = data.get('chat_history', '')
         user_name = data.get('user_name', '')
         relationship = data.get('relationship', '')
@@ -2057,8 +2063,36 @@ async def generate_digital_twin_profile(request: Request):
                     big_five_scores[dim] = round(max(0.0, min(1.0, normalized)), 2)
                 else:
                     big_five_scores[dim] = 0.5
+
+        # 3. 计算防御机制分数
+        defense_scores = {}
+        if defense_answers:
+            d_scores = {}
+            for answer in defense_answers:
+                if answer and 'dimension' in answer and 'value' in answer:
+                    dim = answer['dimension']
+                    val = float(answer['value'])
+                    if dim not in d_scores: d_scores[dim] = []
+                    d_scores[dim].append(val)
+            
+            for dim, values in d_scores.items():
+                defense_scores[dim] = round(sum(values) / len(values), 2)
+
+        # 4. 计算依恋风格分数
+        attachment_scores = {}
+        if attachment_answers:
+            a_scores = {}
+            for answer in attachment_answers:
+                if answer and 'dimension' in answer and 'value' in answer:
+                    dim = answer['dimension']
+                    val = float(answer['value'])
+                    if dim not in a_scores: a_scores[dim] = []
+                    a_scores[dim].append(val)
+            
+            for dim, values in a_scores.items():
+                attachment_scores[dim] = round(sum(values) / len(values), 2)
         
-        # 3. 构建Prompt
+        # 5. 构建Prompt
         prompt = "你是一位专业的数字孪生人格分析师。请基于以下所有信息，生成用户的完整人格画像。\n\n"
         
         # MBTI信息
@@ -2071,16 +2105,40 @@ async def generate_digital_twin_profile(request: Request):
             prompt += "**MBTI类型**: 未知\n"
             
         # 核心层信息
-        prompt += "\n## 二、核心层信息\n"
+        prompt += "\n## 二、核心层信息 (Big Five)\n"
         if big_five_scores:
             prompt += f"**Big Five评分**（基于问卷计算）: {json.dumps(big_five_scores, ensure_ascii=False, indent=2)}\n"
         else:
             prompt += "用户未完成核心层问卷。\n"
-            if chat_history:
-                prompt += "**注意**: 请基于后续提供的聊天记录，推断用户的Big Five人格特征、价值观和防御机制。\n"
+
+        # 深层机制信息
+        prompt += "\n## 三、深层机制信息\n"
+        if defense_scores:
+            prompt += f"**防御机制倾向** (1-5分): {json.dumps(defense_scores, ensure_ascii=False, indent=2)}\n"
+            # 找出得分最高的防御机制
+            top_defense = max(defense_scores.items(), key=lambda x: x[1])[0] if defense_scores else "Unknown"
+            prompt += f"**主要防御机制**: {top_defense}\n"
+        else:
+            prompt += "用户未完成防御机制问卷。\n"
+
+        if attachment_scores:
+            prompt += f"**依恋风格倾向** (1-5分): {json.dumps(attachment_scores, ensure_ascii=False, indent=2)}\n"
+            # 找出得分最高的依恋风格
+            top_attachment = max(attachment_scores.items(), key=lambda x: x[1])[0] if attachment_scores else "Unknown"
+            prompt += f"**主要依恋风格**: {top_attachment}\n"
+        else:
+            prompt += "用户未完成依恋风格问卷。\n"
+
+        if values_order:
+            prompt += f"**价值观排序** (从最重要到最不重要): {', '.join(values_order)}\n"
+        else:
+            prompt += "用户未完成价值观排序。\n"
+
+        if not big_five_scores and not defense_scores and chat_history:
+             prompt += "**注意**: 由于缺乏问卷数据，请重点基于后续提供的聊天记录，推断用户的Big Five人格特征、价值观和防御机制。\n"
                 
         # 聊天记录信息
-        prompt += "\n## 三、用户聊天记录\n"
+        prompt += "\n## 四、用户聊天记录\n"
         if chat_history:
             prompt += f"**用户名称**: {user_name}\n"
             if relationship:
@@ -2100,12 +2158,15 @@ async def generate_digital_twin_profile(request: Request):
             
         # 生成要求
         prompt += """
-\n## 四、分析与生成要求
+\n## 五、分析与生成要求
 
 请按以下步骤进行思考 (Chain of Thought):
-1. **核心特质识别**: 分析Big Five得分模式，识别最突出的性格维度。
-2. **一致性检验**: 如果有聊天记录，对比问卷结果和聊天风格是否一致。
-3. **深层机制推断**: 基于人格特质，推断可能的防御机制（如高神经质可能对应"压抑"或"投射"）和核心价值观。
+1. **核心特质识别**: 结合MBTI、Big Five和价值观排序，构建用户的人格核心。
+2. **深层动力分析**: 
+   - 结合依恋风格和防御机制，分析用户在压力或亲密关系中的行为模式。
+   - 确保生成的 defense_mechanism 与问卷结果一致（如有）。
+   - 确保生成的 values 与用户的价值观排序一致（如有）。
+3. **一致性检验**: 如果有聊天记录，对比问卷结果和聊天风格是否一致。
 4. **语言风格设计**: 确保生成的语言风格（speaking_style）与人格特质高度匹配。
 
 请生成一个完整的JSON对象，包含以下所有字段：
@@ -2115,7 +2176,8 @@ async def generate_digital_twin_profile(request: Request):
     "mbti": "MBTI类型",
     "big_five": {"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5},
     "values": ["价值观1", "价值观2", "价值观3"],
-    "defense_mechanism": "防御机制名称 (英文)"
+    "defense_mechanism": "防御机制名称 (英文)",
+    "attachment_style": "依恋风格 (Secure/Anxious/Avoidant)"
   },
   "speaking_style": {
     "sentence_length": "short/medium/long/mixed",
@@ -2135,8 +2197,9 @@ async def generate_digital_twin_profile(request: Request):
 1. **MBTI类型**: 必须使用确定的MBTI类型。
 2. **核心层数据**: 
    - Big Five评分必须基于计算结果（如有）。
-   - values数组生成3-5个中文词汇，反映其核心驱动力。
-   - defense_mechanism从以下选择：Rationalization, Projection, Denial, Repression, Sublimation, Displacement, ReactionFormation, Humor, Intellectualization。
+   - values数组生成3-5个中文词汇，必须优先参考用户的价值观排序。
+   - defense_mechanism: 如果有问卷结果，必须使用得分最高的机制；否则从以下选择：Rationalization, Projection, Denial, Repression, Sublimation, Displacement, ReactionFormation, Humor, Intellectualization。
+   - attachment_style: 如果有问卷结果，必须使用得分最高的风格；否则根据分析推断。
 3. **表象层数据**: 
    - 如果有聊天记录，必须深入分析生成speaking_style对象。
    - 如果没有聊天记录，请根据MBTI和Big Five推断最可能的语言风格。
@@ -2297,6 +2360,20 @@ async def restore_user_agent(request: Request):
         
         # 从数字孪生数据中提取 soul_profile
         soul_profile = digital_twin.get('extracted_profile', {})
+        
+        # 兼容新版结构 (core_traits)
+        if not soul_profile and 'core_traits' in digital_twin:
+            core_traits = digital_twin['core_traits']
+            soul_profile = {
+                "mbti": core_traits.get('mbti'),
+                "interests": core_traits.get('values', []), # 使用values作为兴趣/价值观
+                "social_goals": core_traits.get('values', []),
+                "big_five": core_traits.get('big_five', {}),
+                "defense_mechanism": core_traits.get('defense_mechanism'),
+                "attachment_style": core_traits.get('attachment_style'),
+                "personality": core_traits # 保留完整core_traits
+            }
+
         if not soul_profile:
             # 如果没有 extracted_profile，尝试从其他字段构建
             soul_profile = get_soul_profile(user_id=user_id)
@@ -2423,22 +2500,72 @@ async def neural_match(request: Request):
         
         # 计算匹配度
         matches = []
+        
+        # 调试输出：用户profile
+        print(f"\n========== Neural Matching Debug ==========")
+        print(f"User Profile:")
+        print(f"  MBTI: {user_profile.get('mbti')}")
+        print(f"  Big Five: {user_profile.get('personality')}")
+        print(f"  Interests: {user_profile.get('interests')[:3] if user_profile.get('interests') else 'None'}...")
+        print(f"  Values: {user_profile.get('social_goals')[:3] if user_profile.get('social_goals') else 'None'}...")
+        print(f"==========================================\n")
+        
+        # 预计算用户Embedding（避免重复计算）
+        user_embeddings = {}
+        embedding_model = manager.scrollweaver.server.embedding
+        
+        if embedding_model:
+            try:
+                # 准备用户文本数据
+                user_interests_text = " ".join(user_profile.get("interests", []))
+                user_values_text = " ".join(user_profile.get("social_goals", [])) # Values usually in social_goals or values
+                user_goals_text = " ".join(user_profile.get("social_goals", []))
+                
+                # 批量生成Embedding
+                texts_to_embed = [t for t in [user_interests_text, user_values_text, user_goals_text] if t]
+                if texts_to_embed:
+                    embeddings = embedding_model(texts_to_embed)
+                    idx = 0
+                    if user_interests_text:
+                        user_embeddings["interests"] = embeddings[idx]
+                        idx += 1
+                    if user_values_text:
+                        user_embeddings["values"] = embeddings[idx]
+                        idx += 1
+                    if user_goals_text:
+                        user_embeddings["goals"] = embeddings[idx]
+                        idx += 1
+            except Exception as e:
+                print(f"Error generating user embeddings: {e}")
+
         for preset in preset_templates:
             preset_profile = {
                 "interests": preset.get('interests', []),
                 "mbti": preset.get('mbti', ''),
                 "social_goals": preset.get('social_goals', []),
-                "personality": preset.get('personality', '')
+                "personality": preset.get('personality', ''),
+                "big_five": preset.get('big_five', {}),
+                "values": preset.get('values', [])
             }
             
-            # 使用简化的匹配算法（基于兴趣、MBTI、社交目标）
-            compatibility = calculate_simple_compatibility(user_profile, preset_profile)
+            # 使用高级匹配算法
+            # 获取预设Agent的Embedding (带缓存)
+            preset_embeddings = PresetAgents.get_preset_embeddings(preset, embedding_model)
+            
+            compatibility_result = calculate_advanced_compatibility(user_profile, preset_profile, user_embeddings, preset_embeddings)
+            compatibility = compatibility_result['score']
+            breakdown = compatibility_result['breakdown']
+            
+            # 调试输出：每个preset的匹配度
+            print(f"[Match] {preset.get('name'):15s} | MBTI: {preset.get('mbti'):4s} | Score: {compatibility*100:5.1f}%")
+            print(f"  Breakdown: {breakdown}")
             
             matches.append({
                 "id": preset.get('id'),
                 "name": preset.get('name'),
                 "role": preset.get('description', ''),
                 "match": round(compatibility * 100),
+                "match_breakdown": breakdown,  # 添加详细breakdown
                 "avatar": get_avatar_color(preset.get('id')),
                 "status": "online",
                 "preset": preset
@@ -2447,17 +2574,31 @@ async def neural_match(request: Request):
         # 按匹配度排序
         matches.sort(key=lambda x: x['match'], reverse=True)
         
+        # 调试输出：排序后的结果
+        print(f"\n========== Sorted Matches ==========")
+        for i, match in enumerate(matches[:5], 1):
+            print(f"{i}. {match['name']:15s} | {match['match']}%")
+        print(f"====================================\n")
+        
         # Top 3 完美共鸣
         top_matches = matches[:3]
         
-        # 2 个随机遭遇（从剩余的中随机选择）
-        remaining = matches[3:]
-        random_encounters = []
-        if len(remaining) >= 2:
-            import random
-            random_encounters = random.sample(remaining, 2)
-        elif len(remaining) == 1:
-            random_encounters = remaining
+        # 2 个随机遭遇（从匹配度较低的agents中选择，增加多样性）
+        import random
+        # 从后50%的agents中随机选择（真正的"偶然遭遇"，不是高匹配）
+        all_remaining = matches[3:]
+        if len(all_remaining) >= 4:
+            # 如果剩余agents足够多，从后半部分（低匹配度）中随机选择
+            lower_half_start = len(all_remaining) // 2
+            random_pool = all_remaining[lower_half_start:]
+            random_encounters = random.sample(random_pool, min(2, len(random_pool)))
+        elif len(all_remaining) >= 2:
+            # agents不够多，就从所有剩余中随机选
+            random_encounters = random.sample(all_remaining, 2)
+        elif len(all_remaining) == 1:
+            random_encounters = all_remaining
+        else:
+            random_encounters = []
         
         return {
             "success": True,
@@ -2472,60 +2613,192 @@ async def neural_match(request: Request):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-def calculate_simple_compatibility(profile1: dict, profile2: dict) -> float:
-    """简化的匹配度计算算法"""
+def calculate_advanced_compatibility(profile1: dict, profile2: dict, user_embeddings: dict = None, preset_embeddings: dict = None) -> float:
+    """
+    高级匹配度计算算法 (Scheme C + B)
+    综合考量：性格共鸣(40%) + 价值观契合(35%) + 兴趣重叠(15%) + 社交目标(10%)
+    """
+    import numpy as np
+    
     scores = []
     
-    # 1. 兴趣相似度 (40%)
-    interests1 = set(profile1.get('interests', []))
-    interests2 = set(profile2.get('interests', []))
-    if interests1 and interests2:
-        intersection = len(interests1 & interests2)
-        union = len(interests1 | interests2)
-        interests_score = intersection / union if union > 0 else 0.5
-    else:
-        interests_score = 0.5
-    scores.append(('interests', interests_score, 0.4))
+    # --- 1. 性格共鸣 (Personality Resonance) - 权重 40% ---
+    # 包含 Big Five 距离 (25%) + MBTI 互补性 (15%)
     
-    # 2. MBTI 兼容度 (30%)
+    # A. Big Five 距离 (欧几里得距离)
+    bf1 = profile1.get('personality', {})
+    bf2 = profile2.get('big_five', {})
+    
+    # 确保是字典且有数据
+    if not isinstance(bf1, dict): bf1 = {}
+    if not isinstance(bf2, dict): bf2 = {}
+    
+    dims = ['openness', 'conscientiousness', 'extraversion', 'agreeableness', 'neuroticism']
+    dist_sq = 0
+    valid_dims = 0
+    
+    for dim in dims:
+        v1 = bf1.get(dim)
+        v2 = bf2.get(dim)
+        if v1 is not None and v2 is not None:
+            # 归一化差异 (假设输入是0-1)
+            diff = float(v1) - float(v2)
+            dist_sq += diff * diff
+            valid_dims += 1
+            
+    if valid_dims > 0:
+        # 计算平均距离
+        avg_dist = np.sqrt(dist_sq / valid_dims)
+        # 距离越小越好，转换为相似度 (0-1)
+        # 使用更强的高斯核函数增加区分度: gamma从2.0提升到5.0
+        bf_score = np.exp(-5.0 * (avg_dist ** 2))
+    else:
+        bf_score = 0.3 # 默认降低（从0.5降至0.3），缺失数据时匹配度更低
+        
+    # B. MBTI 互补性
     mbti1 = profile1.get('mbti', '')
     mbti2 = profile2.get('mbti', '')
-    if mbti1 and mbti2:
-        if mbti1 == mbti2:
-            mbti_score = 0.9
-        else:
-            # 计算相同维度数
-            same_dims = sum(1 for i in range(min(len(mbti1), len(mbti2))) if mbti1[i] == mbti2[i])
-            if same_dims >= 3:
-                mbti_score = 0.7
-            elif same_dims == 2:
-                mbti_score = 0.5
-            else:
-                mbti_score = 0.3
-    else:
-        mbti_score = 0.5
-    scores.append(('mbti', mbti_score, 0.3))
+    mbti_score = 0.3  # 默认降低
     
-    # 3. 社交目标/价值观兼容度 (30%)
-    goals1 = set(profile1.get('social_goals', []))
-    goals2 = set(profile2.get('social_goals', []))
-    if goals1 and goals2:
-        intersection = len(goals1 & goals2)
-        union = len(goals1 | goals2)
-        goals_score = intersection / union if union > 0 else 0.5
+    if mbti1 and mbti2 and len(mbti1) == 4 and len(mbti2) == 4:
+        # E/I: 互补更好 (Different is better)
+        s_ei = 1.0 if mbti1[0] != mbti2[0] else 0.5  # 降低"相同"的分数
+        # N/S: 相同更好 (Same is better) - 沟通基础
+        s_ns = 1.0 if mbti1[1] == mbti2[1] else 0.3  # 增加惩罚
+        # T/F: 互补或相同皆可，视情况而定，这里暂定相同稍好
+        s_tf = 0.7 if mbti1[2] == mbti2[2] else 0.5
+        # J/P: 互补通常有助于生活协作，但在闲聊中相同可能更轻松
+        s_jp = 0.7 if mbti1[3] == mbti2[3] else 0.5
+        
+        mbti_score = (s_ei * 0.3 + s_ns * 0.4 + s_tf * 0.15 + s_jp * 0.15)
+        
+    personality_resonance = bf_score * 0.6 + mbti_score * 0.4
+    scores.append(('personality', personality_resonance, 0.50))  # 提升到50%权重
+    
+    # --- 2. 语义匹配 (Semantic Matching) ---
+    # 辅助函数：计算余弦相似度
+    def cosine_sim(vec1, vec2):
+        if vec1 is None or vec2 is None: return 0.3  # 降低默认值
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        if norm1 == 0 or norm2 == 0: return 0.0
+        return np.dot(vec1, vec2) / (norm1 * norm2)
+
+    # A. 价值观契合 (Values Alignment) - 权重 35%
+    values_score = 0.3  # 降低默认值
+    if user_embeddings and "values" in user_embeddings and preset_embeddings and "values" in preset_embeddings:
+        try:
+            raw_sim = cosine_sim(user_embeddings["values"], preset_embeddings["values"])
+            # 激进的非线性映射：余弦相似度天生偏高，需要强力压制
+            # 使用指数惩罚: score = (raw_sim - 0.5)^3 if > 0.5
+            if raw_sim > 0.85:
+                values_score = 0.7 + (raw_sim - 0.85) * 2.0  # 0.85-1.0 → 0.7-1.0
+            elif raw_sim > 0.75:
+                values_score = 0.4 + (raw_sim - 0.75) * 3.0  # 0.75-0.85 → 0.4-0.7
+            elif raw_sim > 0.65:
+                values_score = 0.2 + (raw_sim - 0.65) * 2.0  # 0.65-0.75 → 0.2-0.4
+            elif raw_sim > 0.5:
+                values_score = (raw_sim - 0.5) * 1.33        # 0.5-0.65 → 0-0.2
+            else:
+                values_score = 0.0
+        except:
+            pass
     else:
-        goals_score = 0.5
-    scores.append(('goals', goals_score, 0.3))
+        # 回退到 Jaccard
+        v1 = set(profile1.get('social_goals', [])) # User values often in social_goals
+        v2 = set(profile2.get('values', []))
+        if v1 and v2:
+            values_score = len(v1 & v2) / len(v1 | v2)
+            
+    scores.append(('values', values_score, 0.30))  # 降低权重
+    
+    # B. 兴趣重叠 (Interests Overlap) - 权重 15%
+    interests_score = 0.3  # 降低默认值
+    if user_embeddings and "interests" in user_embeddings and preset_embeddings and "interests" in preset_embeddings:
+        try:
+            raw_sim = cosine_sim(user_embeddings["interests"], preset_embeddings["interests"])
+            # 应用同样激进的映射
+            if raw_sim > 0.8:
+                interests_score = 0.6 + (raw_sim - 0.8) * 2.0
+            elif raw_sim > 0.65:
+                interests_score = 0.3 + (raw_sim - 0.65) * 2.0
+            elif raw_sim > 0.5:
+                interests_score = (raw_sim - 0.5) * 2.0
+            else:
+                interests_score = 0.0
+        except:
+            pass
+    else:
+        # 回退到 Jaccard
+        i1 = set(profile1.get('interests', []))
+        i2 = set(profile2.get('interests', []))
+        if i1 and i2:
+            interests_score = len(i1 & i2) / len(i1 | i2)
+            
+    scores.append(('interests', interests_score, 0.10))  # 降低权重
+    
+    # C. 社交目标 (Social Goals) - 权重 10%
+    goals_score = 0.3  # 降低默认值
+    if user_embeddings and "goals" in user_embeddings and preset_embeddings and "goals" in preset_embeddings:
+        try:
+            raw_sim = cosine_sim(user_embeddings["goals"], preset_embeddings["goals"])
+            # 应用最激进的映射（因为这个维度区分度最差）
+            if raw_sim > 0.85:
+                goals_score = 0.7 + (raw_sim - 0.85) * 2.0
+            elif raw_sim > 0.7:
+                goals_score = 0.3 + (raw_sim - 0.7) * 2.67
+            elif raw_sim > 0.5:
+                goals_score = (raw_sim - 0.5) * 1.5
+            else:
+                goals_score = 0.0
+        except:
+            pass
+    else:
+        # 回退到 Jaccard
+        g1 = set(profile1.get('social_goals', []))
+        g2 = set(profile2.get('social_goals', []))
+        if g1 and g2:
+            goals_score = len(g1 & g2) / len(g1 | g2)
+            
+    scores.append(('goals', goals_score, 0.10))
     
     # 计算加权总分
     total_score = sum(score * weight for _, score, weight in scores)
     
-    # 添加微小的随机扰动 (±3%)，避免大量相同的分数
-    import random
-    jitter = random.uniform(-0.03, 0.03)
-    final_score = max(0.1, min(0.99, total_score + jitter))
+    # 调试输出：各维度得分
+    debug_output = f"  P:{scores[0][1]:.2f}({scores[0][2]}) V:{scores[1][1]:.2f}({scores[1][2]}) I:{scores[2][1]:.2f}({scores[2][2]}) G:{scores[3][1]:.2f}({scores[3][2]}) => Total:{total_score:.3f}"
     
-    return final_score
+    # 应用非线性映射，进一步拉大区分度
+    # 使用sigmoid风格的映射
+    import random
+    # 将0.3-0.9的原始分数映射到0.1-0.99
+    if total_score > 0.6:
+        # 高分区：0.6-1.0 → 0.65-0.99
+        mapped_score = 0.65 + (total_score - 0.6) * 0.85
+    elif total_score > 0.4:
+        # 中分区：0.4-0.6 → 0.35-0.65
+        mapped_score = 0.35 + (total_score - 0.4) * 1.5
+    else:
+        # 低分区：0.0-0.4 → 0.1-0.35
+        mapped_score = 0.1 + total_score * 0.625
+    
+    # 添加小的随机扰动，避免分数完全相同
+    jitter = random.uniform(-0.03, 0.03)
+    final_score = max(0.05, min(0.99, mapped_score + jitter))
+    
+    # 输出映射后的分数
+    print(debug_output + f" | Mapped:{mapped_score:.3f} Final:{final_score:.3f}")
+    
+    # 返回最终分数和详细breakdown
+    return {
+        'score': final_score,
+        'breakdown': {
+            'personality': round(scores[0][1] * 100, 1),
+            'values': round(scores[1][1] * 100, 1),
+            'interests': round(scores[2][1] * 100, 1),
+            'goals': round(scores[3][1] * 100, 1)
+        }
+    }
 
 def get_avatar_color(preset_id: str) -> str:
     """根据预设ID返回头像颜色类"""

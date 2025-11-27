@@ -145,6 +145,7 @@ export default function UniverseView({ user }) {
           name: match.name,
           role: match.role,
           match: match.match,
+          match_breakdown: match.match_breakdown, // 保留详细匹配数据
           avatar: match.avatar || 'bg-gradient-to-br from-purple-500 to-indigo-600',
           description: match.role,
           role_code: null,  // ← 初始为 null，将由 addMatchedAgentsToSandbox 更新
@@ -177,12 +178,16 @@ export default function UniverseView({ user }) {
         if (agent.preset_id) {
           const result = await api.addPresetNPC(agent.preset_id, agent.name);
           if (result.success && result.agent_info) {
-            // 保存完整的agent_info，这样查看档案时能显示所有数据
+            // 保存完整的agent_info，同时保留匹配度信息
             updatedAgents.push({
               ...agent,
               role_code: result.agent_info.role_code,
-              // Store complete agent info for profile viewing
-              fullAgentInfo: result.agent_info
+              // Store complete agent info for profile viewing, but preserve match data
+              fullAgentInfo: {
+                ...result.agent_info,
+                match: agent.match,  // 保留匹配度
+                match_breakdown: agent.match_breakdown  // 保留详细breakdown
+              }
             });
             console.log(`✓ Added agent ${agent.name} with complete profile data`);
           } else {

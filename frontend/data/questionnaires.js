@@ -199,3 +199,64 @@ export const CORE_QUESTIONS = [
     { id: "BF_N_9", text: "我很容易被激怒。", dimension: "neuroticism", direction: 1, options: LIKERT_OPTIONS },
     { id: "BF_N_10", text: "我对自己感到满意。", dimension: "neuroticism", direction: -1, options: LIKERT_OPTIONS }
 ];
+
+// 防御机制问卷题目（15题）
+export const DEFENSE_QUESTIONS = [
+    // Rationalization (3 items)
+    { id: "DM_RAT_1", text: "当事情出错时，我通常能找到合理的解释证明不是我的错。", dimension: "rationalization", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_RAT_2", text: "如果我没达到目标，我会告诉自己那个目标其实并不重要。", dimension: "rationalization", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_RAT_3", text: "我经常为自己的决定寻找逻辑理由，即使是冲动做出的决定。", dimension: "rationalization", direction: 1, options: LIKERT_OPTIONS },
+
+    // Projection (3 items)
+    { id: "DM_PRO_1", text: "我觉得很多人都对我有敌意。", dimension: "projection", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_PRO_2", text: "我经常发现别人有我讨厌的缺点。", dimension: "projection", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_PRO_3", text: "如果我心情不好，通常是因为周围人的态度问题。", dimension: "projection", direction: 1, options: LIKERT_OPTIONS },
+
+    // Denial (3 items)
+    { id: "DM_DEN_1", text: "面对坏消息时，我的第一反应通常是不相信。", dimension: "denial", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_DEN_2", text: "我倾向于忽略那些让我感到不舒服的事实。", dimension: "denial", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_DEN_3", text: "即使有明显的证据，我有时也很难承认问题的存在。", dimension: "denial", direction: 1, options: LIKERT_OPTIONS },
+
+    // Sublimation (3 items)
+    { id: "DM_SUB_1", text: "当我感到沮丧时，我会通过工作或创作来发泄。", dimension: "sublimation", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_SUB_2", text: "我认为将负面情绪转化为积极的行动是很重要的。", dimension: "sublimation", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_SUB_3", text: "运动是我处理压力的主要方式。", dimension: "sublimation", direction: 1, options: LIKERT_OPTIONS },
+
+    // Humor (3 items)
+    { id: "DM_HUM_1", text: "在尴尬或紧张的场合，我经常开玩笑来缓解气氛。", dimension: "humor", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_HUM_2", text: "即使在困难时期，我也能找到事情有趣的一面。", dimension: "humor", direction: 1, options: LIKERT_OPTIONS },
+    { id: "DM_HUM_3", text: "我用幽默来掩饰内心的痛苦。", dimension: "humor", direction: 1, options: LIKERT_OPTIONS }
+];
+
+// 依恋风格问卷题目（12题）
+export const ATTACHMENT_QUESTIONS = [
+    // Secure (4 items)
+    { id: "ATT_SEC_1", text: "我很容易与人亲近。", dimension: "secure", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_SEC_2", text: "我不担心被别人抛弃。", dimension: "secure", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_SEC_3", text: "我相信在需要时，别人会支持我。", dimension: "secure", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_SEC_4", text: "我对对他人的依赖感到舒适。", dimension: "secure", direction: 1, options: LIKERT_OPTIONS },
+
+    // Anxious (4 items)
+    { id: "ATT_ANX_1", text: "我经常担心我的伴侣或朋友并不真正关心我。", dimension: "anxious", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_ANX_2", text: "我渴望非常亲密的关系，但这有时会吓跑别人。", dimension: "anxious", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_ANX_3", text: "如果别人没有及时回复我，我会感到焦虑。", dimension: "anxious", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_ANX_4", text: "我非常在意别人对我的看法。", dimension: "anxious", direction: 1, options: LIKERT_OPTIONS },
+
+    // Avoidant (4 items)
+    { id: "ATT_AVO_1", text: "我更喜欢保持独立，不依赖他人。", dimension: "avoidant", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_AVO_2", text: "当别人试图与我太亲近时，我会感到不舒服。", dimension: "avoidant", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_AVO_3", text: "我不习惯向别人展示我的脆弱。", dimension: "avoidant", direction: 1, options: LIKERT_OPTIONS },
+    { id: "ATT_AVO_4", text: "我倾向于在情感上与人保持距离。", dimension: "avoidant", direction: 1, options: LIKERT_OPTIONS }
+];
+
+// 价值观排序项
+export const VALUES_LIST = [
+    { id: "val_1", text: "成就与成功", desc: "追求卓越，获得认可" },
+    { id: "val_2", text: "亲密关系", desc: "深厚的情感连接，爱与被爱" },
+    { id: "val_3", text: "自由与独立", desc: "自主决定，不受束缚" },
+    { id: "val_4", text: "稳定与安全", desc: "生活安稳，规避风险" },
+    { id: "val_5", text: "创造与创新", desc: "探索新事物，表达自我" },
+    { id: "val_6", text: "助人与奉献", desc: "帮助他人，造福社会" },
+    { id: "val_7", text: "快乐与享受", desc: "享受生活，追求愉悦" },
+    { id: "val_8", text: "传统与责任", desc: "尊重传统，履行义务" }
+];

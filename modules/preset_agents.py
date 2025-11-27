@@ -430,3 +430,87 @@ class PresetAgents:
             style_examples=[]
         )
 
+    # --- Embedding Cache ---
+    _EMBEDDING_CACHE = None
+    _CACHE_FILE = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data', 'preset_agents', 'preset_embeddings.pkl'
+    )
+
+    @staticmethod
+    def _load_embedding_cache():
+        import pickle
+        if PresetAgents._EMBEDDING_CACHE is not None:
+            return
+        
+        if os.path.exists(PresetAgents._CACHE_FILE):
+            try:
+                with open(PresetAgents._CACHE_FILE, 'rb') as f:
+                    PresetAgents._EMBEDDING_CACHE = pickle.load(f)
+            except Exception as e:
+                print(f"Error loading embedding cache: {e}")
+                PresetAgents._EMBEDDING_CACHE = {}
+        else:
+            PresetAgents._EMBEDDING_CACHE = {}
+
+    @staticmethod
+    def _save_embedding_cache():
+        import pickle
+        try:
+            os.makedirs(os.path.dirname(PresetAgents._CACHE_FILE), exist_ok=True)
+            with open(PresetAgents._CACHE_FILE, 'wb') as f:
+                pickle.dump(PresetAgents._EMBEDDING_CACHE, f)
+        except Exception as e:
+            print(f"Error saving embedding cache: {e}")
+
+    @staticmethod
+    def get_preset_embeddings(preset: Dict[str, Any], embedding_model) -> Dict[str, Any]:
+        """
+        获取预设Agent的Embedding（优先从缓存读取）
+        
+        Args:
+            preset: 预设Agent配置
+            embedding_model: Embedding模型函数
+            
+        Returns:
+            Dict: 包含 'interests', 'values', 'goals' 的 embedding 向量
+        """
+        PresetAgents._load_embedding_cache()
+        
+        preset_id = preset['id']
+        # 简单的缓存键生成：ID + 内容哈希（简化版只用ID，假设ID唯一且内容不变）
+        # 如果需要更严谨，可以将 interests/values 等内容拼接后 hash
+        
+        if preset_id in PresetAgents._EMBEDDING_CACHE:
+            return PresetAgents._EMBEDDING_CACHE[preset_id]
+        
+        # 计算 Embedding
+        embeddings = {}
+        try:
+            interests_text = " ".join(preset.get('interests', []))
+            values_text = " ".join(preset.get('values', []))
+            goals_text = " ".join(preset.get('social_goals', []))
+            
+            texts = [t for t in [interests_text, values_text, goals_text] if t]
+            if texts and embedding_model:
+                vecs = embedding_model(texts)
+                idx = 0
+                if interests_text:
+                    embeddings['interests'] = vecs[idx]
+                    idx += 1
+                if values_text:
+                    embeddings['values'] = vecs[idx]
+                    idx += 1
+                if goals_text:
+                    embeddings['goals'] = vecs[idx]
+                    idx += 1
+            
+            # 更新缓存
+            PresetAgents._EMBEDDING_CACHE[preset_id] = embeddings
+            PresetAgents._save_embedding_cache()
+            
+        except Exception as e:
+            print(f"Error computing embeddings for preset {preset_id}: {e}")
+            
+        return embeddings
+
