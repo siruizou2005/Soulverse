@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Globe, MessageSquare, User } from 'lucide-react';
 import { api } from '../services/api';
 
-export default function NeuralMatching({ matchedTwins = [], randomTwins = [], onToggleAgent, onStartChat, chatStarted = false }) {
+export default function NeuralMatching({ matchedTwins = [], randomTwins = [], onToggleAgent, onStartChat, onViewProfile, chatStarted = false }) {
   const [userDisplayName, setUserDisplayName] = useState('User_001');
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
         setUserDisplayName(displayName || 'User_001');
         return;
       }
-      
+
       // 如果没有数字孪生，尝试获取当前用户信息
       const userResult = await api.getCurrentUser();
       if (userResult.success && userResult.user) {
@@ -89,6 +89,15 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                   >
                     私密对话
                   </button>
+                  <button
+                    className="flex-1 py-1 text-xs bg-purple-500/20 text-purple-300 rounded hover:bg-purple-500/40"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onViewProfile && onViewProfile(twin);
+                    }}
+                  >
+                    查看档案
+                  </button>
                 </div>
               </div>
             ))}
@@ -112,10 +121,19 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                   <div className={`w-8 h-8 rounded-full ${twin.avatar} grayscale group-hover:grayscale-0 flex items-center justify-center text-[10px] font-bold`}>
                     {twin.name.substring(0, 1)}
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <div className="text-sm text-slate-300">{twin.name}</div>
                     <div className="text-[10px] text-slate-600">匹配度: {twin.match}%</div>
                   </div>
+                  <button
+                    className="px-2 py-1 text-[10px] bg-slate-800 text-slate-400 rounded hover:bg-slate-700 hover:text-slate-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onViewProfile && onViewProfile(twin);
+                    }}
+                  >
+                    档案
+                  </button>
                 </div>
               </div>
             ))}

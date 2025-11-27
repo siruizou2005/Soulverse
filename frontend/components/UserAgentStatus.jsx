@@ -3,15 +3,25 @@ import { User, X, Brain, Shield, Sparkles, MessageSquare } from 'lucide-react';
 import { api } from '../services/api';
 import PersonalityRadar from './PersonalityRadar';
 
-export default function UserAgentStatus({ isOpen, onClose }) {
+export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
   const [agentInfo, setAgentInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isOpen) {
-      loadAgentInfo();
+      if (agentData) {
+        // agentData could be either:
+        // 1. Full agent_info from backend (has personality, generated_profile, etc.)
+        // 2. Simple matched agent data (minimal info)
+        // UserAgentStatus will handle both gracefully
+        setAgentInfo(agentData);
+        setLoading(false);
+      } else {
+        // Load user's own digital twin
+        loadAgentInfo();
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, agentData]);
 
   const loadAgentInfo = async () => {
     try {
@@ -34,6 +44,7 @@ export default function UserAgentStatus({ isOpen, onClose }) {
     if (!agentInfo) return null;
     return agentInfo.generated_profile?.core_traits?.big_five ||
       agentInfo.personality?.big_five ||
+      agentInfo.preset?.big_five || // Fallback to preset data
       null;
   };
 
@@ -41,19 +52,22 @@ export default function UserAgentStatus({ isOpen, onClose }) {
     if (!agentInfo) return [];
     return agentInfo.generated_profile?.core_traits?.values ||
       agentInfo.personality?.values ||
+      agentInfo.preset?.values || // Fallback to preset data
       [];
   };
 
   const getDefenseMechanism = () => {
     if (!agentInfo) return null;
     return agentInfo.generated_profile?.core_traits?.defense_mechanism ||
-      agentInfo.personality?.defense_mechanism;
+      agentInfo.personality?.defense_mechanism ||
+      agentInfo.preset?.defense_mechanism; // Fallback to preset data
   };
 
   const getMbti = () => {
     if (!agentInfo) return null;
     return agentInfo.generated_profile?.core_traits?.mbti ||
       agentInfo.personality?.mbti ||
+      agentInfo.preset?.mbti || // Fallback to preset data
       (agentInfo.location ? agentInfo.location.replace('MBTI: ', '') : null);
   };
 
@@ -85,8 +99,8 @@ export default function UserAgentStatus({ isOpen, onClose }) {
               <User className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white tracking-wide">我的数字孪生</h2>
-              <p className="text-xs text-cyan-400 font-mono tracking-wider">DIGITAL TWIN PROFILE</p>
+              <h2 className="text-xl font-bold text-white tracking-wide">{agentData ? 'Agent档案' : '我的数字孪生'}</h2>
+              <p className="text-xs text-cyan-400 font-mono tracking-wider">{agentData ? 'AGENT PROFILE' : 'DIGITAL TWIN PROFILE'}</p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full">

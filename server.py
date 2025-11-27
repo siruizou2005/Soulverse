@@ -1406,6 +1406,9 @@ async def add_preset_npc(request: Request):
                         )
                         print(f"[Add NPC] Restored user agent {digital_twin['role_code']}")
         
+        # 获取语言风格（用于前端显示）
+        speaking_style = PresetAgents._get_speaking_style_for_preset(preset_id, preset_template.get("mbti"))
+        
         return {
             "success": True,
             "agent_info": {
@@ -1413,7 +1416,20 @@ async def add_preset_npc(request: Request):
                 "role_name": npc_agent.role_name,
                 "nickname": npc_agent.nickname,
                 "location": npc_agent.location_name,
-                "profile": npc_agent.role_profile[:200] + "..." if len(npc_agent.role_profile) > 200 else npc_agent.role_profile,
+                "profile": preset_template.get("description", npc_agent.role_profile[:100]), # 使用简短描述
+                "personality": {
+                    "mbti": preset_template.get("mbti"),
+                    "big_five": preset_template.get("big_five"),
+                    "values": preset_template.get("values"),
+                    "defense_mechanism": preset_template.get("defense_mechanism")
+                },
+                "speaking_style": speaking_style,
+                "generated_profile": {
+                     "core_traits": {
+                         "values": preset_template.get("values"),
+                         "defense_mechanism": preset_template.get("defense_mechanism")
+                     }
+                },
                 "preset_info": {
                     "preset_id": preset_id,
                     "preset_name": preset_template["name"]

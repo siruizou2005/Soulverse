@@ -20,6 +20,7 @@ export default function UniverseView({ user }) {
   const [is1on1, setIs1on1] = useState(false);
   const [targetAgent, setTargetAgent] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [viewingAgent, setViewingAgent] = useState(null); // Track which agent profile to view
   const initRef = useRef(false); // 防止 StrictMode 重复执行
 
   useEffect(() => {
@@ -167,20 +168,23 @@ export default function UniverseView({ user }) {
     }
   };
 
+
   const addMatchedAgentsToSandbox = async (agents) => {
-    // 遍历添加预设agent到沙盒，并更新role_code
+    // 遍历添加预设agent到沙盒，并更新role_code和完整的agent_info
     const updatedAgents = [];
     for (const agent of agents) {
       try {
         if (agent.preset_id) {
           const result = await api.addPresetNPC(agent.preset_id, agent.name);
           if (result.success && result.agent_info) {
-            // 使用后端返回的真实 role_code 更新 agent 信息
+            // 保存完整的agent_info，这样查看档案时能显示所有数据
             updatedAgents.push({
               ...agent,
-              role_code: result.agent_info.role_code  // ← 使用后端返回的真实 role_code
+              role_code: result.agent_info.role_code,
+              // Store complete agent info for profile viewing
+              fullAgentInfo: result.agent_info
             });
-            console.log(`✓ Added agent ${agent.name} with role_code: ${result.agent_info.role_code}`);
+            console.log(`✓ Added agent ${agent.name} with complete profile data`);
           } else {
             updatedAgents.push(agent);  // 如果失败，保留原始信息
           }
@@ -195,6 +199,7 @@ export default function UniverseView({ user }) {
 
     // 更新selectedAgents为包含真实role_code的列表
     setSelectedAgents(updatedAgents);
+
   };
 
   const handleWizardComplete = async (agentInfo) => {
@@ -300,6 +305,20 @@ export default function UniverseView({ user }) {
     }
   };
 
+  const handleViewProfile = (agent) => {
+    console.log('Viewing agent profile:', agent);
+
+    // Try to find if this agent is already loaded in the sandbox with full info
+    // Match by role_code or preset_id (agent.id from neural match is the preset_id)
+    const loadedAgent = selectedAgents.find(a =>
+      (a.role_code && agent.role_code && a.role_code === agent.role_code) ||
+      (a.preset_id && agent.id && a.preset_id === agent.id)
+    );
+
+    // Use fullAgentInfo if available, otherwise use basic agent data
+    setViewingAgent(loadedAgent?.fullAgentInfo || agent);
+  };
+
   if (!hasDigitalTwin) {
     return (
       <div className="relative w-full h-screen bg-black text-white overflow-hidden flex items-center justify-center">
@@ -332,6 +351,7 @@ export default function UniverseView({ user }) {
           randomTwins={selectedAgents.slice(3)}
           onToggleAgent={handleToggleAgent}
           onStartChat={handleStart1on1Chat}
+          onViewProfile={handleViewProfile}
           chatStarted={chatStarted}
         />
         <ChatInterface
@@ -345,6 +365,13 @@ export default function UniverseView({ user }) {
           <UserAgentStatus
             isOpen={showUserStatus}
             onClose={() => setShowUserStatus(false)}
+          />
+        )}
+        {viewingAgent && (
+          <UserAgentStatus
+            isOpen={!!viewingAgent}
+            onClose={() => setViewingAgent(null)}
+            agentData={viewingAgent}
           />
         )}
       </div>
@@ -361,6 +388,7 @@ export default function UniverseView({ user }) {
         randomTwins={selectedAgents.slice(3)}
         onToggleAgent={handleToggleAgent}
         onStartChat={handleStart1on1Chat}
+        onViewProfile={handleViewProfile}
         chatStarted={chatStarted}
       />
 
@@ -457,6 +485,13 @@ export default function UniverseView({ user }) {
         <UserAgentStatus
           isOpen={showUserStatus}
           onClose={() => setShowUserStatus(false)}
+        />
+      )}
+      {viewingAgent && (
+        <UserAgentStatus
+          isOpen={!!viewingAgent}
+          onClose={() => setViewingAgent(null)}
+          agentData={viewingAgent}
         />
       )}
     </div>
