@@ -2001,6 +2001,9 @@ async def generate_digital_twin_profile(request: Request):
                 ('T' if counts['T'] >= counts['F'] else 'T') +
                 ('J' if counts['J'] >= counts['P'] else 'P')
             )
+        elif not final_mbti:
+            # 如果没有MBTI类型且无法计算（新版问卷数据在后端未配置题目元数据），暂定为未知
+            pass
             
         # 2. 计算Big Five分数
         big_five_scores = None
@@ -2016,13 +2019,26 @@ async def generate_digital_twin_profile(request: Request):
             for answer in big_five_answers:
                 if answer and 'dimension' in answer and 'value' in answer:
                     dim = answer['dimension']
-                    if dim in scores:
-                        scores[dim].append(float(answer['value']))
+                    try:
+                        val = float(answer['value'])
+                        
+                        # 处理反向计分 (1-5量表)
+                        if 'direction' in answer and int(answer.get('direction', 1)) == -1:
+                            val = 6 - val
+                            
+                        if dim in scores:
+                            scores[dim].append(val)
+                    except (ValueError, TypeError):
+                        continue
             
             big_five_scores = {}
             for dim, values in scores.items():
                 if values:
-                    big_five_scores[dim] = sum(values) / len(values)
+                    # 计算平均分 (1-5)
+                    avg = sum(values) / len(values)
+                    # 归一化到 0-1 (1->0, 5->1)
+                    normalized = (avg - 1) / 4
+                    big_five_scores[dim] = round(max(0.0, min(1.0, normalized)), 2)
                 else:
                     big_five_scores[dim] = 0.5
         
@@ -2068,7 +2084,13 @@ async def generate_digital_twin_profile(request: Request):
             
         # 生成要求
         prompt += """
-\n## 四、生成要求
+\n## 四、分析与生成要求
+
+请按以下步骤进行思考 (Chain of Thought):
+1. **核心特质识别**: 分析Big Five得分模式，识别最突出的性格维度。
+2. **一致性检验**: 如果有聊天记录，对比问卷结果和聊天风格是否一致。
+3. **深层机制推断**: 基于人格特质，推断可能的防御机制（如高神经质可能对应"压抑"或"投射"）和核心价值观。
+4. **语言风格设计**: 确保生成的语言风格（speaking_style）与人格特质高度匹配。
 
 请生成一个完整的JSON对象，包含以下所有字段：
 
@@ -2077,7 +2099,7 @@ async def generate_digital_twin_profile(request: Request):
     "mbti": "MBTI类型",
     "big_five": {"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5},
     "values": ["价值观1", "价值观2", "价值观3"],
-    "defense_mechanism": "防御机制名称"
+    "defense_mechanism": "防御机制名称 (英文)"
   },
   "speaking_style": {
     "sentence_length": "short/medium/long/mixed",
@@ -2094,15 +2116,14 @@ async def generate_digital_twin_profile(request: Request):
 }
 
 **重要规则**:
-1. **MBTI类型**: 必须使用确定的MBTI类型
+1. **MBTI类型**: 必须使用确定的MBTI类型。
 2. **核心层数据**: 
-   - 如果有Big Five评分，请直接使用
-   - 如果没有，请基于聊天记录推断（0-1之间的数值）
-   - values数组生成3-5个中文词汇
-   - defense_mechanism从以下选择：Rationalization, Projection, Denial, Repression, Sublimation, Displacement, ReactionFormation, Humor, Intellectualization
+   - Big Five评分必须基于计算结果（如有）。
+   - values数组生成3-5个中文词汇，反映其核心驱动力。
+   - defense_mechanism从以下选择：Rationalization, Projection, Denial, Repression, Sublimation, Displacement, ReactionFormation, Humor, Intellectualization。
 3. **表象层数据**: 
-   - 如果有聊天记录，必须深入分析生成speaking_style对象
-   - 如果没有聊天记录，speaking_style可以为null
+   - 如果有聊天记录，必须深入分析生成speaking_style对象。
+   - 如果没有聊天记录，请根据MBTI和Big Five推断最可能的语言风格。
 4. 只返回JSON对象，不要包含markdown代码块标记。
 """
 

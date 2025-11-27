@@ -38,18 +38,31 @@ export default function CreationWizard({ onClose, onComplete }) {
     { title: "神经元构建", icon: <Zap className="w-5 h-5" />, desc: "正在生成你的数字孪生..." },
   ];
 
-  // 计算MBTI结果
+  // 计算MBTI结果 (Updated for Likert)
   const calculateMbti = () => {
-    const counts = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
-    mbtiAnswers.forEach(answer => {
-      if (answer) counts[answer]++;
+    const scores = { EI: 0, SN: 0, TF: 0, JP: 0 };
+
+    mbtiAnswers.forEach((value, index) => {
+      if (!value) return;
+      const question = MBTI_QUESTIONS[index];
+
+      // 计算得分：如果direction为正，value直接加；如果为负，(6-value)加
+      // 范围 1-5
+      let score = value;
+      if (question.direction === -1) {
+        score = 6 - value;
+      }
+      scores[question.dimension] += score;
     });
 
+    // 每维度5题，满分25，中值15
+    // >15 为正向维度 (E, N, F, P)
+    // <=15 为负向维度 (I, S, T, J)
     return (
-      (counts.E >= counts.I ? 'E' : 'I') +
-      (counts.S >= counts.N ? 'S' : 'N') +
-      (counts.T >= counts.F ? 'T' : 'F') +
-      (counts.J >= counts.P ? 'J' : 'P')
+      (scores.EI > 15 ? 'E' : 'I') +
+      (scores.SN > 15 ? 'N' : 'S') +
+      (scores.TF > 15 ? 'F' : 'T') +
+      (scores.JP > 15 ? 'P' : 'J')
     );
   };
 
@@ -267,26 +280,33 @@ export default function CreationWizard({ onClose, onComplete }) {
 
         <h3 className="text-xl text-white mb-8">{question.text}</h3>
 
-        <div className="space-y-4">
-          {question.options.map((option, idx) => (
-            <button
-              key={idx}
-              onClick={() => {
-                const newAnswers = [...mbtiAnswers];
-                newAnswers[currentMbtiQuestion] = option.value;
-                setMbtiAnswers(newAnswers);
-                if (currentMbtiQuestion < MBTI_QUESTIONS.length - 1) {
-                  setTimeout(() => setCurrentMbtiQuestion(curr => curr + 1), 200);
-                }
-              }}
-              className={`w-full p-4 text-left rounded-xl border transition-all ${mbtiAnswers[currentMbtiQuestion] === option.value
-                ? 'bg-cyan-500/20 border-cyan-500 text-white'
-                : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-500'
-                }`}
-            >
-              {option.text}
-            </button>
-          ))}
+        <div className="space-y-6">
+          <div className="flex justify-between px-2 text-slate-400 text-sm mb-2">
+            <span>非常不同意</span>
+            <span>非常同意</span>
+          </div>
+          <div className="grid grid-cols-5 gap-2">
+            {question.options.map((option, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  const newAnswers = [...mbtiAnswers];
+                  newAnswers[currentMbtiQuestion] = option.value;
+                  setMbtiAnswers(newAnswers);
+                  if (currentMbtiQuestion < MBTI_QUESTIONS.length - 1) {
+                    setTimeout(() => setCurrentMbtiQuestion(curr => curr + 1), 200);
+                  }
+                }}
+                className={`flex flex-col items-center justify-center p-4 rounded-xl border transition-all h-24 ${mbtiAnswers[currentMbtiQuestion] === option.value
+                  ? 'bg-cyan-500/20 border-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                  : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-500'
+                  }`}
+              >
+                <span className="text-xl font-bold mb-1">{option.value}</span>
+                <span className="text-xs text-center opacity-70">{option.text}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mt-auto flex justify-between pt-6">
@@ -362,26 +382,38 @@ export default function CreationWizard({ onClose, onComplete }) {
 
         <h3 className="text-xl text-white mb-8">{question.text}</h3>
 
-        <div className="space-y-3 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
-          {question.options.map((option, idx) => (
-            <button
-              key={idx}
-              onClick={() => {
-                const newAnswers = [...coreAnswers];
-                newAnswers[currentCoreQuestion] = { dimension: question.dimension, value: option.value };
-                setCoreAnswers(newAnswers);
-                if (currentCoreQuestion < CORE_QUESTIONS.length - 1) {
-                  setTimeout(() => setCurrentCoreQuestion(curr => curr + 1), 200);
-                }
-              }}
-              className={`w-full p-3 text-left rounded-xl border transition-all ${coreAnswers[currentCoreQuestion]?.value === option.value
-                ? 'bg-cyan-500/20 border-cyan-500 text-white'
-                : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-500'
-                }`}
-            >
-              {option.text}
-            </button>
-          ))}
+        <div className="space-y-6">
+          <div className="flex justify-between px-2 text-slate-400 text-sm mb-2">
+            <span>非常不同意</span>
+            <span>非常同意</span>
+          </div>
+          <div className="grid grid-cols-5 gap-2">
+            {question.options.map((option, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  const newAnswers = [...coreAnswers];
+                  // Store value and dimension for backend processing
+                  newAnswers[currentCoreQuestion] = {
+                    dimension: question.dimension,
+                    value: option.value,
+                    direction: question.direction
+                  };
+                  setCoreAnswers(newAnswers);
+                  if (currentCoreQuestion < CORE_QUESTIONS.length - 1) {
+                    setTimeout(() => setCurrentCoreQuestion(curr => curr + 1), 200);
+                  }
+                }}
+                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all h-24 ${coreAnswers[currentCoreQuestion]?.value === option.value
+                  ? 'bg-cyan-500/20 border-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                  : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-500'
+                  }`}
+              >
+                <span className="text-xl font-bold mb-1">{option.value}</span>
+                <span className="text-xs text-center opacity-70">{option.text}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mt-auto flex justify-between pt-4">

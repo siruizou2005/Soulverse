@@ -58,6 +58,22 @@ export default function UserAgentStatus({ isOpen, onClose }) {
   };
 
   const bigFiveData = getPersonalityData();
+  const speakingStyle = agentInfo?.generated_profile?.speaking_style || agentInfo?.speaking_style;
+
+  const DEFENSE_MECHANISMS = {
+    'Rationalization': { name: '合理化', desc: '为行为寻找逻辑理由以掩饰真实动机' },
+    'Projection': { name: '投射', desc: '将自己的冲动或欲望归咎于他人' },
+    'Denial': { name: '否认', desc: '拒绝承认痛苦的现实或事实' },
+    'Repression': { name: '压抑', desc: '将痛苦的想法排斥到潜意识中' },
+    'Sublimation': { name: '升华', desc: '将本能冲动转化为社会可接受的行为' },
+    'Displacement': { name: '转移', desc: '将情绪发泄到较安全的替代对象上' },
+    'ReactionFormation': { name: '反向形成', desc: '表现出与内心冲动相反的行为' },
+    'Humor': { name: '幽默', desc: '以幽默的方式处理压力和冲突' },
+    'Intellectualization': { name: '理智化', desc: '用理性的分析回避情感痛苦' }
+  };
+
+  const defense = getDefenseMechanism();
+  const defenseInfo = DEFENSE_MECHANISMS[defense] || { name: defense, desc: '心理防御模式' };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
@@ -90,14 +106,14 @@ export default function UserAgentStatus({ isOpen, onClose }) {
             <div className="flex flex-col md:flex-row h-full">
               {/* Left Column: Visuals */}
               <div className="w-full md:w-5/12 p-8 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-900/50 flex flex-col items-center">
-                <div className="text-center mb-8">
-                  <h3 className="text-3xl font-bold text-white mb-2">{agentInfo.nickname || agentInfo.role_name}</h3>
-                  <div className="inline-block px-4 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-sm">
+                <div className="text-center mb-10">
+                  <h3 className="text-4xl font-bold text-white mb-4 tracking-tight">{agentInfo.nickname || agentInfo.role_name}</h3>
+                  <div className="inline-block px-6 py-2 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-xl font-bold tracking-widest shadow-[0_0_15px_rgba(6,182,212,0.2)]">
                     {getMbti() || 'UNKNOWN TYPE'}
                   </div>
                 </div>
 
-                <div className="flex-1 flex items-center justify-center w-full min-h-[300px]">
+                <div className="flex-1 flex flex-col items-center justify-center w-full min-h-[300px]">
                   {bigFiveData ? (
                     <PersonalityRadar data={bigFiveData} />
                   ) : (
@@ -156,11 +172,18 @@ export default function UserAgentStatus({ isOpen, onClose }) {
                       <Shield className="w-5 h-5 text-red-400" />
                       <span>防御机制</span>
                     </h4>
-                    <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/20">
-                      <div className="text-red-200 font-medium mb-1">
-                        {getDefenseMechanism() || '未检测到'}
+                    <div className="p-6 rounded-xl bg-red-500/5 border border-red-500/20 h-full flex flex-col justify-center min-h-[160px]">
+                      <div className="text-red-200 font-bold text-2xl mb-3 text-center">
+                        {defenseInfo.name || '未检测到'}
                       </div>
-                      <div className="text-xs text-red-400/60">心理防御模式</div>
+                      <div className="text-base text-red-400/80 leading-relaxed text-center">
+                        {defenseInfo.desc}
+                      </div>
+                      {defense && (
+                        <div className="mt-4 text-xs font-mono text-red-500/40 uppercase text-center tracking-widest">
+                          {defense}
+                        </div>
+                      )}
                     </div>
                   </section>
 
@@ -170,13 +193,38 @@ export default function UserAgentStatus({ isOpen, onClose }) {
                       <MessageSquare className="w-5 h-5 text-green-400" />
                       <span>语言风格</span>
                     </h4>
-                    <div className="p-4 rounded-xl bg-green-500/5 border border-green-500/20">
-                      <div className="text-green-200 font-medium mb-1">
-                        {agentInfo.speaking_style?.tone || '自然对话'}
-                      </div>
-                      <div className="text-xs text-green-400/60">
-                        {agentInfo.speaking_style?.sentence_length || '多变'} · {agentInfo.speaking_style?.vocabulary || '标准'}
-                      </div>
+                    <div className="p-6 rounded-xl bg-green-500/5 border border-green-500/20 h-full flex flex-col justify-center min-h-[160px] space-y-4">
+                      {speakingStyle ? (
+                        <>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="bg-green-500/10 rounded-lg px-3 py-2 text-green-300 text-center">
+                              <span className="text-green-500/50 text-xs block mb-1 uppercase tracking-wider">句长</span>
+                              <span className="font-medium text-lg">{speakingStyle.sentence_length || '未知'}</span>
+                            </div>
+                            <div className="bg-green-500/10 rounded-lg px-3 py-2 text-green-300 text-center">
+                              <span className="text-green-500/50 text-xs block mb-1 uppercase tracking-wider">词汇</span>
+                              <span className="font-medium text-lg">{speakingStyle.vocabulary_level || speakingStyle.vocabulary || '未知'}</span>
+                            </div>
+                          </div>
+
+                          {speakingStyle.catchphrases && speakingStyle.catchphrases.length > 0 && (
+                            <div className="text-center">
+                              <div className="text-xs text-green-500/60 mb-2 uppercase tracking-wider">口头禅</div>
+                              <div className="flex flex-wrap gap-2 justify-center">
+                                {speakingStyle.catchphrases.map((phrase, i) => (
+                                  <span key={i} className="text-sm px-3 py-1 rounded-full border border-green-500/30 text-green-300 bg-green-500/5">
+                                    {phrase}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-green-400/60 text-sm text-center">
+                          暂无语言风格数据，请在创建时上传聊天记录。
+                        </div>
+                      )}
                     </div>
                   </section>
                 </div>

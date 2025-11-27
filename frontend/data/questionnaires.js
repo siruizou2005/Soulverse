@@ -18,310 +18,184 @@ export const MBTI_TYPES = [
     { code: 'ESFP', name: '表演者', desc: '自发的、精力充沛的、热情的表演者', icon: '🎬', color: '#fb923c' }
 ];
 
-// MBTI问卷题目（20题，参考16Personalities）
+const LIKERT_OPTIONS = [
+    { text: "非常不同意", value: 1 },
+    { text: "不同意", value: 2 },
+    { text: "中立", value: 3 },
+    { text: "同意", value: 4 },
+    { text: "非常同意", value: 5 }
+];
+
+// MBTI问卷题目（20题，5点量表）
 export const MBTI_QUESTIONS = [
+    // E vs I (5 items)
     {
-        id: 1, text: "在聚会中，你更倾向于：", options: [
-            { text: "与很多人交流，认识新朋友", value: "E" },
-            { text: "与几个熟悉的朋友深入交谈", value: "I" }
-        ]
+        id: "MBTI_EI_1", text: "在社交活动中，我通常会主动介绍自己。",
+        dimension: "EI", direction: 1, // 5=E
+        options: LIKERT_OPTIONS
     },
     {
-        id: 2, text: "你更倾向于：", options: [
-            { text: "先行动，再思考", value: "S" },
-            { text: "先思考，再行动", value: "N" }
-        ]
+        id: "MBTI_EI_2", text: "我喜欢成为注意力的焦点。",
+        dimension: "EI", direction: 1, // 5=E
+        options: LIKERT_OPTIONS
     },
     {
-        id: 3, text: "做决定时，你更依赖：", options: [
-            { text: "逻辑和分析", value: "T" },
-            { text: "价值观和感受", value: "F" }
-        ]
+        id: "MBTI_EI_3", text: "我倾向于先思考，然后再说话。",
+        dimension: "EI", direction: -1, // 5=I
+        options: LIKERT_OPTIONS
     },
     {
-        id: 4, text: "你更喜欢：", options: [
-            { text: "有计划的、有序的生活", value: "J" },
-            { text: "灵活的、随性的生活", value: "P" }
-        ]
+        id: "MBTI_EI_4", text: "在长时间的社交后，我感到精力充沛。",
+        dimension: "EI", direction: 1, // 5=E
+        options: LIKERT_OPTIONS
     },
     {
-        id: 5, text: "面对新环境，你：", options: [
-            { text: "很快适应，感到兴奋", value: "E" },
-            { text: "需要时间适应，感到紧张", value: "I" }
-        ]
+        id: "MBTI_EI_5", text: "我更喜欢一个人安静地度过周末。",
+        dimension: "EI", direction: -1, // 5=I
+        options: LIKERT_OPTIONS
+    },
+
+    // S vs N (5 items)
+    {
+        id: "MBTI_SN_1", text: "我更关注现实中的具体细节，而不是抽象的理论。",
+        dimension: "SN", direction: -1, // 5=S (Low N) -> Wait, let's standardize. Let's say 5=N, 1=S. So this is -1.
+        options: LIKERT_OPTIONS
     },
     {
-        id: 6, text: "你更关注：", options: [
-            { text: "具体的事实和细节", value: "S" },
-            { text: "可能性和整体概念", value: "N" }
-        ]
+        id: "MBTI_SN_2", text: "我经常思考人类存在的意义和未来。",
+        dimension: "SN", direction: 1, // 5=N
+        options: LIKERT_OPTIONS
     },
     {
-        id: 7, text: "在争论中，你更重视：", options: [
-            { text: "客观真理和正确性", value: "T" },
-            { text: "和谐和人际关系", value: "F" }
-        ]
+        id: "MBTI_SN_3", text: "我更相信经过验证的经验，而不是未经测试的新方法。",
+        dimension: "SN", direction: -1, // 5=S
+        options: LIKERT_OPTIONS
     },
     {
-        id: 8, text: "你更喜欢：", options: [
-            { text: "提前完成工作", value: "J" },
-            { text: "在截止日期前完成", value: "P" }
-        ]
+        id: "MBTI_SN_4", text: "我喜欢通过隐喻和类比来表达想法。",
+        dimension: "SN", direction: 1, // 5=N
+        options: LIKERT_OPTIONS
     },
     {
-        id: 9, text: "社交活动后，你：", options: [
-            { text: "感到精力充沛", value: "E" },
-            { text: "感到疲惫，需要独处", value: "I" }
-        ]
+        id: "MBTI_SN_5", text: "我更擅长处理实际操作的任务。",
+        dimension: "SN", direction: -1, // 5=S
+        options: LIKERT_OPTIONS
+    },
+
+    // T vs F (5 items)
+    {
+        id: "MBTI_TF_1", text: "做决定时，逻辑分析比个人感受更重要。",
+        dimension: "TF", direction: -1, // Let's say 5=F, 1=T. So this is -1.
+        options: LIKERT_OPTIONS
     },
     {
-        id: 10, text: "你更倾向于：", options: [
-            { text: "关注现实和实际", value: "S" },
-            { text: "关注未来和可能性", value: "N" }
-        ]
+        id: "MBTI_TF_2", text: "我很容易察觉到他人的情绪变化。",
+        dimension: "TF", direction: 1, // 5=F
+        options: LIKERT_OPTIONS
     },
     {
-        id: 11, text: "做决定时，你更看重：", options: [
-            { text: "公平和一致性", value: "T" },
-            { text: "个人价值观和特殊情况", value: "F" }
-        ]
+        id: "MBTI_TF_3", text: "在争论中，我认为赢得真理比维护和谐更重要。",
+        dimension: "TF", direction: -1, // 5=T
+        options: LIKERT_OPTIONS
     },
     {
-        id: 12, text: "你更喜欢：", options: [
-            { text: "有明确的结构和计划", value: "J" },
-            { text: "保持开放和灵活", value: "P" }
-        ]
+        id: "MBTI_TF_4", text: "我经常被描述为是一个热情和富有同情心的人。",
+        dimension: "TF", direction: 1, // 5=F
+        options: LIKERT_OPTIONS
     },
     {
-        id: 13, text: "在团队中，你：", options: [
-            { text: "主动发言，分享想法", value: "E" },
-            { text: "先倾听，再表达", value: "I" }
-        ]
+        id: "MBTI_TF_5", text: "我认为客观和公正是最重要的原则。",
+        dimension: "TF", direction: -1, // 5=T
+        options: LIKERT_OPTIONS
+    },
+
+    // J vs P (5 items)
+    {
+        id: "MBTI_JP_1", text: "我喜欢做事有详细的计划和时间表。",
+        dimension: "JP", direction: -1, // Let's say 5=P, 1=J. So this is -1.
+        options: LIKERT_OPTIONS
     },
     {
-        id: 14, text: "你更相信：", options: [
-            { text: "经验和传统", value: "S" },
-            { text: "创新和新方法", value: "N" }
-        ]
+        id: "MBTI_JP_2", text: "我喜欢保持选择的开放性，不喜欢过早做决定。",
+        dimension: "JP", direction: 1, // 5=P
+        options: LIKERT_OPTIONS
     },
     {
-        id: 15, text: "面对冲突，你：", options: [
-            { text: "直接面对，寻求解决方案", value: "T" },
-            { text: "考虑他人感受，寻求妥协", value: "F" }
-        ]
+        id: "MBTI_JP_3", text: "我通常在截止日期前的最后一刻才开始工作。",
+        dimension: "JP", direction: 1, // 5=P
+        options: LIKERT_OPTIONS
     },
     {
-        id: 16, text: "你更喜欢：", options: [
-            { text: "完成后再开始新任务", value: "J" },
-            { text: "同时处理多个任务", value: "P" }
-        ]
+        id: "MBTI_JP_4", text: "看到东西没有放回原处会让我感到不舒服。",
+        dimension: "JP", direction: -1, // 5=J
+        options: LIKERT_OPTIONS
     },
     {
-        id: 17, text: "你的能量来源主要是：", options: [
-            { text: "与他人互动", value: "E" },
-            { text: "独处和反思", value: "I" }
-        ]
-    },
-    {
-        id: 18, text: "你更关注：", options: [
-            { text: "现在正在发生的事情", value: "S" },
-            { text: "未来可能发生的事情", value: "N" }
-        ]
-    },
-    {
-        id: 19, text: "评价事物时，你更看重：", options: [
-            { text: "逻辑性和效率", value: "T" },
-            { text: "情感价值和意义", value: "F" }
-        ]
-    },
-    {
-        id: 20, text: "你更喜欢：", options: [
-            { text: "有明确的规则和程序", value: "J" },
-            { text: "自由和自发性", value: "P" }
-        ]
+        id: "MBTI_JP_5", text: "我喜欢按部就班地完成任务清单。",
+        dimension: "JP", direction: -1, // 5=J
+        options: LIKERT_OPTIONS
     }
 ];
 
-// 核心层问卷题目（20题）
+// 核心层问卷题目（50题，Big Five）
 export const CORE_QUESTIONS = [
-    {
-        id: 1, text: "你有多愿意尝试新事物？", dimension: "openness", options: [
-            { text: "非常愿意，我喜欢探索", value: 0.9 },
-            { text: "比较愿意", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太愿意", value: 0.3 },
-            { text: "很不愿意，我更喜欢熟悉的事物", value: 0.1 }
-        ]
-    },
-    {
-        id: 2, text: "你做事有多有条理？", dimension: "conscientiousness", options: [
-            { text: "非常有条理，我计划一切", value: 0.9 },
-            { text: "比较有条理", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太有条理", value: 0.3 },
-            { text: "很随意，很少计划", value: 0.1 }
-        ]
-    },
-    {
-        id: 3, text: "你在社交场合有多活跃？", dimension: "extraversion", options: [
-            { text: "非常活跃，我是焦点", value: 0.9 },
-            { text: "比较活跃", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太活跃", value: 0.3 },
-            { text: "很安静，喜欢观察", value: 0.1 }
-        ]
-    },
-    {
-        id: 4, text: "你有多信任他人？", dimension: "agreeableness", options: [
-            { text: "非常信任，我相信人性本善", value: 0.9 },
-            { text: "比较信任", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太信任", value: 0.3 },
-            { text: "很不信任，我比较谨慎", value: 0.1 }
-        ]
-    },
-    {
-        id: 5, text: "你有多容易感到焦虑？", dimension: "neuroticism", options: [
-            { text: "很少焦虑，我很平静", value: 0.1 },
-            { text: "偶尔焦虑", value: 0.3 },
-            { text: "有时焦虑", value: 0.5 },
-            { text: "经常焦虑", value: 0.7 },
-            { text: "总是焦虑，我很容易担心", value: 0.9 }
-        ]
-    },
-    {
-        id: 6, text: "你对艺术和美的敏感度？", dimension: "openness", options: [
-            { text: "非常敏感，我热爱艺术", value: 0.9 },
-            { text: "比较敏感", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太敏感", value: 0.3 },
-            { text: "不敏感，我更关注实用", value: 0.1 }
-        ]
-    },
-    {
-        id: 7, text: "你完成任务的可靠性？", dimension: "conscientiousness", options: [
-            { text: "非常可靠，我总是按时完成", value: 0.9 },
-            { text: "比较可靠", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太可靠", value: 0.3 },
-            { text: "不可靠，我经常拖延", value: 0.1 }
-        ]
-    },
-    {
-        id: 8, text: "你在人群中感到舒适吗？", dimension: "extraversion", options: [
-            { text: "非常舒适，我享受人群", value: 0.9 },
-            { text: "比较舒适", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太舒适", value: 0.3 },
-            { text: "很不舒适，我更喜欢小群体", value: 0.1 }
-        ]
-    },
-    {
-        id: 9, text: "你有多愿意帮助他人？", dimension: "agreeableness", options: [
-            { text: "非常愿意，我乐于助人", value: 0.9 },
-            { text: "比较愿意", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太愿意", value: 0.3 },
-            { text: "不愿意，我更关注自己", value: 0.1 }
-        ]
-    },
-    {
-        id: 10, text: "你处理压力的能力？", dimension: "neuroticism", options: [
-            { text: "很强，我很少被压力影响", value: 0.1 },
-            { text: "比较强", value: 0.3 },
-            { text: "一般", value: 0.5 },
-            { text: "比较弱", value: 0.7 },
-            { text: "很弱，压力让我很困扰", value: 0.9 }
-        ]
-    },
-    {
-        id: 11, text: "你对抽象概念的兴趣？", dimension: "openness", options: [
-            { text: "非常感兴趣，我热爱思考", value: 0.9 },
-            { text: "比较感兴趣", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太感兴趣", value: 0.3 },
-            { text: "不感兴趣，我更喜欢具体事物", value: 0.1 }
-        ]
-    },
-    {
-        id: 12, text: "你的组织能力？", dimension: "conscientiousness", options: [
-            { text: "非常强，我很有条理", value: 0.9 },
-            { text: "比较强", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "比较弱", value: 0.3 },
-            { text: "很弱，我比较混乱", value: 0.1 }
-        ]
-    },
-    {
-        id: 13, text: "你主动发起对话的频率？", dimension: "extraversion", options: [
-            { text: "经常，我总是主动", value: 0.9 },
-            { text: "比较经常", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太经常", value: 0.3 },
-            { text: "很少，我通常等待他人", value: 0.1 }
-        ]
-    },
-    {
-        id: 14, text: "你对他人感受的敏感度？", dimension: "agreeableness", options: [
-            { text: "非常敏感，我能察觉细微变化", value: 0.9 },
-            { text: "比较敏感", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太敏感", value: 0.3 },
-            { text: "不敏感，我更关注事实", value: 0.1 }
-        ]
-    },
-    {
-        id: 15, text: "你的情绪稳定性？", dimension: "neuroticism", options: [
-            { text: "非常稳定，我很少波动", value: 0.1 },
-            { text: "比较稳定", value: 0.3 },
-            { text: "一般", value: 0.5 },
-            { text: "不太稳定", value: 0.7 },
-            { text: "很不稳定，我情绪波动大", value: 0.9 }
-        ]
-    },
-    {
-        id: 16, text: "你对新想法的接受度？", dimension: "openness", options: [
-            { text: "非常高，我欢迎新想法", value: 0.9 },
-            { text: "比较高", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "比较低", value: 0.3 },
-            { text: "很低，我更喜欢传统", value: 0.1 }
-        ]
-    },
-    {
-        id: 17, text: "你的自律能力？", dimension: "conscientiousness", options: [
-            { text: "非常强，我很有自制力", value: 0.9 },
-            { text: "比较强", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "比较弱", value: 0.3 },
-            { text: "很弱，我容易分心", value: 0.1 }
-        ]
-    },
-    {
-        id: 18, text: "你在社交中的主导性？", dimension: "extraversion", options: [
-            { text: "非常主导，我经常领导", value: 0.9 },
-            { text: "比较主导", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太主导", value: 0.3 },
-            { text: "很少主导，我更喜欢跟随", value: 0.1 }
-        ]
-    },
-    {
-        id: 19, text: "你的合作意愿？", dimension: "agreeableness", options: [
-            { text: "非常愿意，我热爱合作", value: 0.9 },
-            { text: "比较愿意", value: 0.7 },
-            { text: "一般", value: 0.5 },
-            { text: "不太愿意", value: 0.3 },
-            { text: "不愿意，我更喜欢独立", value: 0.1 }
-        ]
-    },
-    {
-        id: 20, text: "你应对挫折的能力？", dimension: "neuroticism", options: [
-            { text: "很强，我很快恢复", value: 0.1 },
-            { text: "比较强", value: 0.3 },
-            { text: "一般", value: 0.5 },
-            { text: "比较弱", value: 0.7 },
-            { text: "很弱，挫折让我很沮丧", value: 0.9 }
-        ]
-    }
+    // Openness (10 items)
+    { id: "BF_O_1", text: "我拥有丰富的想象力。", dimension: "openness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_O_2", text: "我对抽象的概念不感兴趣。", dimension: "openness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_O_3", text: "我经常尝试新的食物或去新的地方。", dimension: "openness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_O_4", text: "我认为艺术和美是非常重要的。", dimension: "openness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_O_5", text: "我倾向于坚持传统的做事方式。", dimension: "openness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_O_6", text: "我喜欢思考哲学问题。", dimension: "openness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_O_7", text: "我很难理解隐喻性的语言。", dimension: "openness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_O_8", text: "我充满好奇心，喜欢学习新事物。", dimension: "openness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_O_9", text: "我更喜欢熟悉的环境，而不是未知的挑战。", dimension: "openness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_O_10", text: "我经常沉浸在自己的幻想世界中。", dimension: "openness", direction: 1, options: LIKERT_OPTIONS },
+
+    // Conscientiousness (10 items)
+    { id: "BF_C_1", text: "我做事总是准备充分。", dimension: "conscientiousness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_C_2", text: "我经常把东西乱放。", dimension: "conscientiousness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_C_3", text: "我注重细节。", dimension: "conscientiousness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_C_4", text: "我经常拖延任务。", dimension: "conscientiousness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_C_5", text: "我严格遵守时间表。", dimension: "conscientiousness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_C_6", text: "我做事有时会半途而废。", dimension: "conscientiousness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_C_7", text: "我喜欢秩序和整洁。", dimension: "conscientiousness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_C_8", text: "我在做决定前会仔细考虑后果。", dimension: "conscientiousness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_C_9", text: "我有时会逃避责任。", dimension: "conscientiousness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_C_10", text: "我是一个追求完美的人。", dimension: "conscientiousness", direction: 1, options: LIKERT_OPTIONS },
+
+    // Extraversion (10 items)
+    { id: "BF_E_1", text: "我是聚会上的活跃分子。", dimension: "extraversion", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_E_2", text: "我不喜欢成为关注的焦点。", dimension: "extraversion", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_E_3", text: "我感到与人交谈很舒服。", dimension: "extraversion", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_E_4", text: "我通常保持沉默。", dimension: "extraversion", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_E_5", text: "我喜欢充满刺激的生活。", dimension: "extraversion", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_E_6", text: "我精力充沛。", dimension: "extraversion", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_E_7", text: "我是一个比较保守的人。", dimension: "extraversion", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_E_8", text: "我很容易结交新朋友。", dimension: "extraversion", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_E_9", text: "我更喜欢独处。", dimension: "extraversion", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_E_10", text: "我经常表现出乐观的情绪。", dimension: "extraversion", direction: 1, options: LIKERT_OPTIONS },
+
+    // Agreeableness (10 items)
+    { id: "BF_A_1", text: "我关心他人。", dimension: "agreeableness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_A_2", text: "我对别人的问题不感兴趣。", dimension: "agreeableness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_A_3", text: "我尊重他人。", dimension: "agreeableness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_A_4", text: "我经常侮辱他人。", dimension: "agreeableness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_A_5", text: "我通常信任别人。", dimension: "agreeableness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_A_6", text: "我很难原谅别人。", dimension: "agreeableness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_A_7", text: "我有一颗柔软的心。", dimension: "agreeableness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_A_8", text: "我有时会利用他人。", dimension: "agreeableness", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_A_9", text: "我喜欢帮助别人。", dimension: "agreeableness", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_A_10", text: "我经常引起冲突。", dimension: "agreeableness", direction: -1, options: LIKERT_OPTIONS },
+
+    // Neuroticism (10 items)
+    { id: "BF_N_1", text: "我经常感到忧郁。", dimension: "neuroticism", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_N_2", text: "我通常很放松。", dimension: "neuroticism", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_N_3", text: "我很容易感到压力。", dimension: "neuroticism", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_N_4", text: "我很少感到焦虑。", dimension: "neuroticism", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_N_5", text: "我的情绪波动很大。", dimension: "neuroticism", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_N_6", text: "我能够很好地控制自己的情绪。", dimension: "neuroticism", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_N_7", text: "我经常担心事情会出错。", dimension: "neuroticism", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_N_8", text: "我在压力下保持冷静。", dimension: "neuroticism", direction: -1, options: LIKERT_OPTIONS },
+    { id: "BF_N_9", text: "我很容易被激怒。", dimension: "neuroticism", direction: 1, options: LIKERT_OPTIONS },
+    { id: "BF_N_10", text: "我对自己感到满意。", dimension: "neuroticism", direction: -1, options: LIKERT_OPTIONS }
 ];
