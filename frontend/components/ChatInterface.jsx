@@ -23,9 +23,12 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
     // 初始化 WebSocket 连接
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    // 始终使用8001端口连接后端（无论是开发还是生产环境）
-    const port = '8001';
-    const websocket = new WebSocket(`${protocol}//${host}:${port}/ws/${clientId.current}`);
+    // 开发环境使用8001端口，生产环境使用当前页面的域名（通过反向代理）
+    const isDev = process.env.NODE_ENV === 'development';
+    const websocketUrl = isDev
+      ? `${protocol}//${host}:8001/ws/${clientId.current}`
+      : `${protocol}//${host}/ws/${clientId.current}`;
+    const websocket = new WebSocket(websocketUrl);
 
     websocket.onopen = async () => {
       console.log('WebSocket connected');
@@ -571,15 +574,15 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
                 <ReactMarkdown
                   className="text-slate-200 leading-relaxed"
                   components={{
-                    h1: ({node, ...props}) => <h1 className="text-2xl font-bold text-white mb-4 mt-6" {...props} />,
-                    h2: ({node, ...props}) => <h2 className="text-xl font-bold text-cyan-400 mb-3 mt-5" {...props} />,
-                    h3: ({node, ...props}) => <h3 className="text-lg font-semibold text-cyan-300 mb-2 mt-4" {...props} />,
-                    p: ({node, ...props}) => <p className="mb-3 text-slate-200" {...props} />,
-                    ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 text-slate-200 space-y-1" {...props} />,
-                    ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 text-slate-200 space-y-1" {...props} />,
-                    li: ({node, ...props}) => <li className="ml-4" {...props} />,
-                    strong: ({node, ...props}) => <strong className="font-semibold text-white" {...props} />,
-                    em: ({node, ...props}) => <em className="italic text-slate-300" {...props} />,
+                    h1: ({ node, ...props }) => <h1 className="text-2xl font-bold text-white mb-4 mt-6" {...props} />,
+                    h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-cyan-400 mb-3 mt-5" {...props} />,
+                    h3: ({ node, ...props }) => <h3 className="text-lg font-semibold text-cyan-300 mb-2 mt-4" {...props} />,
+                    p: ({ node, ...props }) => <p className="mb-3 text-slate-200" {...props} />,
+                    ul: ({ node, ...props }) => <ul className="list-disc list-inside mb-3 text-slate-200 space-y-1" {...props} />,
+                    ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-3 text-slate-200 space-y-1" {...props} />,
+                    li: ({ node, ...props }) => <li className="ml-4" {...props} />,
+                    strong: ({ node, ...props }) => <strong className="font-semibold text-white" {...props} />,
+                    em: ({ node, ...props }) => <em className="italic text-slate-300" {...props} />,
                   }}
                 >
                   {reportData.report_text || reportData.report || '报告内容为空'}

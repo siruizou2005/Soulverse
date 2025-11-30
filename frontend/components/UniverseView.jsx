@@ -32,9 +32,12 @@ export default function UniverseView({ user }) {
     // 初始化 WebSocket 连接（用于接收角色列表更新）
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    const port = process.env.NODE_ENV === 'development' ? '8001' : window.location.port;
+    const isDev = process.env.NODE_ENV === 'development';
     const clientId = Math.random().toString(36).substring(7);
-    const websocket = new WebSocket(`${protocol}//${host}:${port}/ws/${clientId}`);
+    const websocketUrl = isDev
+      ? `${protocol}//${host}:8001/ws/${clientId}`
+      : `${protocol}//${host}/ws/${clientId}`;
+    const websocket = new WebSocket(websocketUrl);
 
     websocket.onopen = () => {
       console.log('UniverseView WebSocket connected');
