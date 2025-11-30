@@ -334,8 +334,21 @@ class Performer:
             # 使用指定的温度参数调用LLM
             response = self.llm.chat(prompt, temperature=temperature)
             try:
-                plan.update(json_parser(response))
-                break
+                parsed_plan = json_parser(response)
+                plan.update(parsed_plan)
+                # 检查detail是否为空或只包含空白字符，如果为空则继续重试
+                detail = plan.get("detail", "")
+                if detail and detail.strip():
+                    # detail有效，退出循环
+                    break
+                else:
+                    # detail为空，继续重试
+                    if i < max_tries - 1:
+                        print(f"{self.role_name}: Parsed successfully but detail is empty, retrying ({i+1}/{max_tries})...")
+                        # 恢复默认detail，避免被空字符串覆盖
+                        plan["detail"] = f"{self.role_name}原地不动，观察情况。" if self.language == "zh" else f"{self.role_name} stays put."
+                    else:
+                        print(f"{self.role_name}: Warning: detail is empty after {max_tries} attempts, using default detail")
             except Exception as e:
                 print(self.role_name)
                 print(f"Parsing failure! {i+1}th tries. Error:", e)   

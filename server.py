@@ -592,30 +592,47 @@ class ConnectionManager:
             # 生成多个选项
             options = []
             for i, config in enumerate(style_configs[:num_options]):
-                try:
-                    # 调用Performer的plan方法生成行动，传入风格提示和温度
-                    plan = performer.plan_with_style(
-                        other_roles_info=other_roles_info,
-                        available_locations=self.scrollweaver.server.orchestrator.locations,
-                        world_description=self.scrollweaver.server.orchestrator.description,
-                        intervention=self.scrollweaver.server.event,
-                        style_hint=config['style_hint'],
-                        temperature=config['temperature']
-                    )
-                    
-                    detail = plan.get("detail", "")
-                    if detail:
-                        options.append({
-                            'index': i + 1,
-                            'style': config['style'],
-                            'name': config['name'],
-                            'description': config['description'],
-                            'text': detail
-                        })
-                except Exception as e:
-                    print(f"Error generating option {i+1} ({config['style']}): {e}")
-                    import traceback
-                    traceback.print_exc()
+                max_retries = 3  # 每个选项最多重试3次
+                retry_count = 0
+                success = False
+                
+                while retry_count < max_retries and not success:
+                    try:
+                        # 调用Performer的plan方法生成行动，传入风格提示和温度
+                        plan = performer.plan_with_style(
+                            other_roles_info=other_roles_info,
+                            available_locations=self.scrollweaver.server.orchestrator.locations,
+                            world_description=self.scrollweaver.server.orchestrator.description,
+                            intervention=self.scrollweaver.server.event,
+                            style_hint=config['style_hint'],
+                            temperature=config['temperature']
+                        )
+                        
+                        detail = plan.get("detail", "")
+                        # 检查detail是否为空或只包含空白字符
+                        if detail and detail.strip():
+                            options.append({
+                                'index': i + 1,
+                                'style': config['style'],
+                                'name': config['name'],
+                                'description': config['description'],
+                                'text': detail
+                            })
+                            success = True
+                        else:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                print(f"Warning: Option {i+1} ({config['style']}) returned empty detail, retrying ({retry_count}/{max_retries-1})...")
+                            else:
+                                print(f"Error: Option {i+1} ({config['style']}) failed after {max_retries} attempts: detail is empty")
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            print(f"Error generating option {i+1} ({config['style']}), retrying ({retry_count}/{max_retries-1}): {e}")
+                        else:
+                            print(f"Error generating option {i+1} ({config['style']}) after {max_retries} attempts: {e}")
+                            import traceback
+                            traceback.print_exc()
             
             return options if options else None
         except Exception as e:
@@ -2362,8 +2379,14 @@ async def restore_user_agent(request: Request):
         soul_profile = digital_twin.get('extracted_profile', {})
         
         # 兼容新版结构 (core_traits)
-        if not soul_profile and 'core_traits' in digital_twin:
-            core_traits = digital_twin['core_traits']
+        # Check for core_traits in personality (where CreationWizard puts it) or at top level
+        core_traits = None
+        if 'personality' in digital_twin and isinstance(digital_twin['personality'], dict) and 'mbti' in digital_twin['personality']:
+             core_traits = digital_twin['personality']
+        elif 'core_traits' in digital_twin:
+             core_traits = digital_twin['core_traits']
+
+        if not soul_profile and core_traits:
             soul_profile = {
                 "mbti": core_traits.get('mbti'),
                 "interests": core_traits.get('values', []), # 使用values作为兴趣/价值观

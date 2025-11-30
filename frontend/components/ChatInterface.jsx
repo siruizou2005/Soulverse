@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Square, User, Bot, UserCircle, FileText, X, Loader, LogOut, ArrowLeft, Trash2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 export default function ChatInterface({ selectedAgents = [], onUserClick, onBackToMatching, onLogout }) {
   const [messages, setMessages] = useState([]);
@@ -22,7 +23,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
     // 初始化 WebSocket 连接
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    const port = process.env.NODE_ENV === 'development' ? '8001' : window.location.port;
+    // 始终使用8001端口连接后端（无论是开发还是生产环境）
+    const port = '8001';
     const websocket = new WebSocket(`${protocol}//${host}:${port}/ws/${clientId.current}`);
 
     websocket.onopen = async () => {
@@ -565,10 +567,23 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
 
             {/* 报告内容 */}
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-              <div className="prose prose-invert max-w-none">
-                <div className="text-slate-200 whitespace-pre-wrap leading-relaxed">
+              <div className="prose prose-invert prose-slate max-w-none">
+                <ReactMarkdown
+                  className="text-slate-200 leading-relaxed"
+                  components={{
+                    h1: ({node, ...props}) => <h1 className="text-2xl font-bold text-white mb-4 mt-6" {...props} />,
+                    h2: ({node, ...props}) => <h2 className="text-xl font-bold text-cyan-400 mb-3 mt-5" {...props} />,
+                    h3: ({node, ...props}) => <h3 className="text-lg font-semibold text-cyan-300 mb-2 mt-4" {...props} />,
+                    p: ({node, ...props}) => <p className="mb-3 text-slate-200" {...props} />,
+                    ul: ({node, ...props}) => <ul className="list-disc list-inside mb-3 text-slate-200 space-y-1" {...props} />,
+                    ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-3 text-slate-200 space-y-1" {...props} />,
+                    li: ({node, ...props}) => <li className="ml-4" {...props} />,
+                    strong: ({node, ...props}) => <strong className="font-semibold text-white" {...props} />,
+                    em: ({node, ...props}) => <em className="italic text-slate-300" {...props} />,
+                  }}
+                >
                   {reportData.report_text || reportData.report || '报告内容为空'}
-                </div>
+                </ReactMarkdown>
               </div>
             </div>
 

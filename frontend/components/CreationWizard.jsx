@@ -681,6 +681,18 @@ export default function CreationWizard({ onClose, onComplete }) {
       );
     }
 
+    if (styleMode === 'skip') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center">
+          <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-6">
+            <MessageSquare className="w-10 h-10 text-slate-400" />
+          </div>
+          <h3 className="text-xl text-white mb-2">已准备好生成</h3>
+          <p className="text-slate-400 max-w-xs">我们将使用默认的语言风格构建您的数字孪生。</p>
+        </div>
+      );
+    }
+
     if (styleMode === 'upload') {
       return (
         <div className="flex flex-col h-full gap-4">
@@ -845,9 +857,9 @@ export default function CreationWizard({ onClose, onComplete }) {
         </div>
 
         {/* Progress Bar */}
-        {step < 4 && (
+        {step < 5 && (
           <div className="flex border-b border-slate-800 bg-slate-950/50">
-            {steps.slice(0, 3).map((s, i) => (
+            {steps.slice(0, 4).map((s, i) => (
               <div
                 key={i}
                 className={`flex-1 p-4 flex items-center justify-center gap-2 border-b-2 transition-colors ${step === i + 1
@@ -868,18 +880,20 @@ export default function CreationWizard({ onClose, onComplete }) {
         <div className="flex-1 p-8 overflow-hidden">
           {step === 1 && renderMbtiStep()}
           {step === 2 && renderCoreStep()}
-          {step === 3 && renderStyleStep()}
-          {step === 4 && renderResult()}
+          {step === 3 && renderNuancedStep()}
+          {step === 4 && renderStyleStep()}
+          {step === 5 && renderResult()}
         </div>
 
         {/* Footer */}
-        {step < 4 && (
+        {step < 5 && (
           <div className="p-6 border-t border-slate-800 flex justify-between bg-slate-900">
             <button
               onClick={() => {
                 if (step === 1 && mbtiMode) setMbtiMode(null);
                 else if (step === 2 && coreMode) setCoreMode(null);
-                else if (step === 3 && styleMode) setStyleMode(null);
+                else if (step === 3 && nuancedMode) setNuancedMode(null);
+                else if (step === 4 && styleMode) setStyleMode(null);
                 else if (step > 1) setStep(step - 1);
                 else onClose();
               }}
@@ -894,13 +908,13 @@ export default function CreationWizard({ onClose, onComplete }) {
               disabled={isNextDisabled()}
               className="bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold px-8 py-2 rounded-lg flex items-center gap-2 transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:shadow-[0_0_30px_rgba(6,182,212,0.6)]"
             >
-              {step === 3 ? '开始生成' : '下一步'}
+              {step === 4 ? '开始生成' : '下一步'}
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        {step === 4 && !loading && (
+        {step === 5 && !loading && (
           <div className="p-6 border-t border-slate-800 flex justify-center bg-slate-900">
             <button
               onClick={handleConfirm}

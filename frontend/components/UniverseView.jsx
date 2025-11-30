@@ -182,6 +182,7 @@ export default function UniverseView({ user }) {
             updatedAgents.push({
               ...agent,
               role_code: result.agent_info.role_code,
+              disabled: agent.disabled || false,  // 明确保留disabled字段
               // Store complete agent info for profile viewing, but preserve match data
               fullAgentInfo: {
                 ...result.agent_info,
@@ -204,6 +205,8 @@ export default function UniverseView({ user }) {
 
     // 更新selectedAgents为包含真实role_code的列表
     setSelectedAgents(updatedAgents);
+    console.log('✓ All agents added to sandbox. Updated agents:', updatedAgents);
+    console.log('✓ Enabled agents count:', updatedAgents.filter(a => !a.disabled).length);
 
   };
 
@@ -220,10 +223,16 @@ export default function UniverseView({ user }) {
   };
 
   const handleStartChat = () => {
+    console.log('handleStartChat called');
+    console.log('selectedAgents:', selectedAgents);
+    console.log('selectedAgents.length:', selectedAgents.length);
     if (selectedAgents.length > 0) {
+      console.log('✓ Starting chat...');
       setChatStarted(true);
       setIs1on1(false);
       setTargetAgent(null);
+    } else {
+      console.log('✗ Cannot start chat: no selected agents');
     }
   };
 
