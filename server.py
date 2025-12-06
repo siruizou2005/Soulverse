@@ -18,6 +18,14 @@ from modules.soul_api_mock import get_soul_profile
 from modules.profile_extractor import ProfileExtractor, extract_profile_from_text, extract_profile_from_qa
 from modules.preset_agents import PresetAgents
 from fastapi import UploadFile, File, Form
+import base64
+try:
+    from google import genai
+    from google.genai import types
+    USE_NEW_GENAI_API = True
+except ImportError:
+    import google.generativeai as genai
+    USE_NEW_GENAI_API = False
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -2336,6 +2344,200 @@ async def get_digital_twin(request: Request):
         print(f"Error in get_digital_twin: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/generate-anime-images")
+async def generate_anime_images(
+    front_photo: UploadFile = File(...),
+    life_photo_1: UploadFile = File(...),
+    life_photo_2: UploadFile = File(...)
+):
+    """使用 Gemini Nano Banana Pro 将人物图片动漫化"""
+    try:
+        # 配置 Gemini API
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise HTTPException(status_code=500, detail="未配置 GEMINI_API_KEY")
+        
+        # 创建图片存储目录（保存到 pic 文件夹）
+        images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pic')
+        os.makedirs(images_dir, exist_ok=True)
+        
+        # 读取图片文件
+        front_photo_data = await front_photo.read()
+        life_photo_1_data = await life_photo_1.read()
+        life_photo_2_data = await life_photo_2.read()
+        
+        # 初始化 Gemini 客户端
+        # 临时禁用代理以避免 OAuth2 连接错误
+        original_proxy_vars = {}
+        proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+        for var in proxy_vars:
+            if var in os.environ:
+                original_proxy_vars[var] = os.environ[var]
+                del os.environ[var]
+        
+        client = None
+        use_new_api = USE_NEW_GENAI_API
+        # 对于图片生成，强制使用旧 API (google.generativeai)
+        import google.generativeai as genai_old
+        genai_module = genai_old
+        
+        try:
+            if use_new_api:
+                client = genai_module.Client(api_key=gemini_api_key)
+            else:
+                genai_module.configure(api_key=gemini_api_key)
+        except Exception as client_error:
+            print(f"警告：创建 Gemini 客户端时出错: {client_error}")
+            # 如果新 API 失败，尝试使用旧 API
+            if use_new_api:
+                print("尝试使用旧版 API...")
+                try:
+                    import google.generativeai as genai_old
+                    genai_old.configure(api_key=gemini_api_key)
+                    use_new_api = False
+                    genai_module = genai_old
+                    client = None  # 旧 API 不需要 client 对象
+                except Exception as fallback_error:
+                    print(f"旧版 API 也失败: {fallback_error}")
+                    # 恢复代理环境变量
+                    for var, value in original_proxy_vars.items():
+                        os.environ[var] = value
+                    raise HTTPException(status_code=500, detail=f"无法初始化 Gemini API 客户端: {fallback_error}")
+            else:
+                # 恢复代理环境变量
+                for var, value in original_proxy_vars.items():
+                    os.environ[var] = value
+                raise HTTPException(status_code=500, detail=f"无法初始化 Gemini API 客户端: {client_error}")
+        
+        anime_images = {}
+        image_files = [
+            ('front', front_photo_data, front_photo.filename),
+            ('life1', life_photo_1_data, life_photo_1.filename),
+            ('life2', life_photo_2_data, life_photo_2.filename)
+        ]
+        
+        for img_type, img_data, filename in image_files:
+            try:
+                import PIL.Image
+                import io
+                
+                # 从字节数据创建 PIL Image 对象
+                img = PIL.Image.open(io.BytesIO(img_data))
+                
+                # 动漫化提示词
+                prompt = "请动漫化人物图片"
+                
+                # 保存生成的动漫图片路径
+                anime_filename = f"{img_type}_{int(datetime.now().timestamp())}.png"
+                anime_path = os.path.join(images_dir, anime_filename)
+                
+                try:
+                    # 注意：新 API 的图片生成模型不支持 API Key，强制使用旧 API
+                    # 使用旧的 API (google.generativeai) 进行图片生成
+                    print(f"[Anime] 开始处理 {img_type}")
+                    print(f"[Anime] 提示词: {prompt}")
+                    # 使用 gemini-2.0-flash-exp，它支持图片生成和 API Key
+                    model = genai_module.GenerativeModel('gemini-2.0-flash-exp')
+                    print(f"[Anime] 调用模型: gemini-2.0-flash-exp")
+                    response = model.generate_content([prompt, img])
+                    print(f"[Anime] API 调用成功，响应类型: {type(response)}")
+                    
+                    # 尝试从响应中提取图片
+                    image_saved = False
+                    if hasattr(response, 'candidates') and response.candidates:
+                        print(f"[Anime] 找到 {len(response.candidates)} 个候选结果")
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                            print(f"[Anime] 内容有 {len(candidate.content.parts)} 个部分")
+                            for i, part in enumerate(candidate.content.parts):
+                                print(f"[Anime] 检查 Part {i}: {type(part)}")
+                                if hasattr(part, 'inline_data') and part.inline_data:
+                                    print(f"[Anime] ✅ 找到图片数据！")
+                                    import base64
+                                    try:
+                                        image_data = base64.b64decode(part.inline_data.data)
+                                        with open(anime_path, 'wb') as f:
+                                            f.write(image_data)
+                                        image_saved = True
+                                        print(f"[Anime] ✅ 成功保存动漫图片: {img_type}")
+                                        break
+                                    except Exception as decode_error:
+                                        print(f"[Anime] ❌ 解码图片数据失败: {decode_error}")
+                                        import traceback
+                                        traceback.print_exc()
+                                        continue
+                                elif hasattr(part, 'text'):
+                                    print(f"[Anime] Part {i} 是文本: {part.text[:100] if part.text else 'None'}")
+                        else:
+                            print(f"[Anime] ⚠️ 候选结果没有 content.parts")
+                    else:
+                        print(f"[Anime] ⚠️ 响应没有 candidates 或 candidates 为空")
+                        if hasattr(response, 'text'):
+                            print(f"[Anime] 响应文本: {response.text[:500] if response.text else 'None'}")
+                    
+                    if not image_saved:
+                        print(f"[Anime] ⚠️ 警告: 未找到图片数据，保存原始图片: {img_type}")
+                        img.save(anime_path)
+                            
+                except Exception as api_error:
+                    print(f"Gemini API error for {img_type}: {api_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # 如果 API 调用失败，保存原始图片
+                    img.save(anime_path)
+                
+                anime_images[img_type] = f"/api/anime-images/{anime_filename}"
+                
+            except Exception as e:
+                print(f"Error processing {img_type} image: {e}")
+                import traceback
+                traceback.print_exc()
+                # 如果处理失败，保存原始图片
+                anime_filename = f"{img_type}_{int(datetime.now().timestamp())}.jpg"
+                anime_path = os.path.join(images_dir, anime_filename)
+                with open(anime_path, 'wb') as f:
+                    f.write(img_data)
+                anime_images[img_type] = f"/api/anime-images/{anime_filename}"
+        
+        # 恢复代理环境变量
+        for var, value in original_proxy_vars.items():
+            os.environ[var] = value
+        
+        return {
+            "success": True,
+            "anime_images": anime_images,
+            "message": "动漫化处理完成"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in generate_anime_images: {e}")
+        import traceback
+        traceback.print_exc()
+        # 确保返回 JSON 格式的错误响应
+        error_detail = str(e)
+        # 如果错误信息太长，截断
+        if len(error_detail) > 200:
+            error_detail = error_detail[:200] + "..."
+        raise HTTPException(status_code=500, detail=error_detail)
+
+# 添加静态文件服务，用于访问动漫化图片
+anime_images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pic')
+os.makedirs(anime_images_dir, exist_ok=True)
+
+@app.get("/api/anime-images/{filename}")
+async def get_anime_image(filename: str):
+    """获取动漫化图片"""
+    try:
+        file_path = os.path.join(anime_images_dir, filename)
+        if os.path.exists(file_path):
+            return FileResponse(file_path)
+        else:
+            raise HTTPException(status_code=404, detail="图片不存在")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/restore-user-agent")
 async def restore_user_agent(request: Request):
     """从已保存的数字孪生恢复用户 agent 到沙盒"""
@@ -2582,6 +2784,10 @@ async def neural_match(request: Request):
             # 调试输出：每个preset的匹配度
             print(f"[Match] {preset.get('name'):15s} | MBTI: {preset.get('mbti'):4s} | Score: {compatibility*100:5.1f}%")
             print(f"  Breakdown: {breakdown}")
+            
+            # 获取预设 agent 的动漫化图片（如果有）
+            anime_images = None
+            # 注意：预设 agents 可能没有动漫化图片，只有用户数字孪生才有
             
             matches.append({
                 "id": preset.get('id'),

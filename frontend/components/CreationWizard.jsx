@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ArrowRight, ArrowLeft, Fingerprint, Cpu, User, Zap, Check, Upload, MessageSquare, Shield, Heart, ListOrdered } from 'lucide-react';
+import { X, ArrowRight, ArrowLeft, Fingerprint, Cpu, User, Zap, Check, Upload, MessageSquare, Shield, Heart, ListOrdered, Image as ImageIcon } from 'lucide-react';
 import { api } from '../services/api';
 import { MBTI_TYPES, MBTI_QUESTIONS, CORE_QUESTIONS, DEFENSE_QUESTIONS, ATTACHMENT_QUESTIONS, VALUES_LIST } from '../data/questionnaires';
 
 export default function CreationWizard({ onClose, onComplete }) {
-  // 步骤: 1=MBTI, 2=核心层(BigFive), 3=细腻层(Defense/Attach/Values), 4=风格层(聊天记录), 5=生成中/结果
+  // 步骤: 1=MBTI, 2=核心层(BigFive), 3=细腻层(Defense/Attach/Values), 4=风格层(聊天记录), 5=动漫化人物, 6=生成中/结果
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -35,6 +35,18 @@ export default function CreationWizard({ onClose, onComplete }) {
   const [chatHistory, setChatHistory] = useState('');
   const [wechatName, setWechatName] = useState('');
   const [relationship, setRelationship] = useState('');
+  
+  // 动漫化步骤状态
+  const [animeMode, setAnimeMode] = useState(null); // 'skip' | 'generate'
+  
+  // 动漫化图片状态
+  const [frontPhoto, setFrontPhoto] = useState(null);
+  const [frontPhotoPreview, setFrontPhotoPreview] = useState(null);
+  const [lifePhoto1, setLifePhoto1] = useState(null);
+  const [lifePhoto1Preview, setLifePhoto1Preview] = useState(null);
+  const [lifePhoto2, setLifePhoto2] = useState(null);
+  const [lifePhoto2Preview, setLifePhoto2Preview] = useState(null);
+  const [animeImages, setAnimeImages] = useState(null); // 存储动漫化后的图片URL
 
   // 生成结果
   const [generatedProfile, setGeneratedProfile] = useState(null);
@@ -45,6 +57,7 @@ export default function CreationWizard({ onClose, onComplete }) {
     { title: "核心特质 (Big Five)", icon: <Cpu className="w-5 h-5" />, desc: "通过大五人格测试，深入刻画你的性格维度。" },
     { title: "深层机制", icon: <Shield className="w-5 h-5" />, desc: "探索防御机制、依恋风格和价值观。" },
     { title: "语言风格", icon: <MessageSquare className="w-5 h-5" />, desc: "上传聊天记录，让数字孪生学习你的表达习惯。" },
+    { title: "动漫化形象", icon: <ImageIcon className="w-5 h-5" />, desc: "上传照片，AI 生成动漫形象。" },
     { title: "神经元构建", icon: <Zap className="w-5 h-5" />, desc: "正在生成你的数字孪生..." },
   ];
 
@@ -99,7 +112,91 @@ export default function CreationWizard({ onClose, onComplete }) {
       }
     } else if (step === 4) {
       setStep(5);
-      await generateProfile();
+    } else if (step === 5) {
+      // 步骤5：处理动漫化（可选）
+      if (animeMode === 'generate') {
+        if (!frontPhoto || !lifePhoto1 || !lifePhoto2) {
+          alert('请上传所有三张照片（1张正面照 + 2张生活照）');
+          return;
+        }
+        // 先上传并处理图片
+        await handleAnimeGeneration();
+      } else {
+        // 跳过动漫化，直接生成
+        setStep(6);
+        await generateProfile();
+      }
+    }
+  };
+
+  // 处理图片上传和预览
+  const handleImageUpload = (file, type) => {
+    if (!file) return;
+    
+    // 验证文件类型
+    if (!file.type.startsWith('image/')) {
+      alert('请上传图片文件');
+      return;
+    }
+    
+    // 验证文件大小（限制为5MB）
+    if (file.size > 5 * 1024 * 1024) {
+      alert('图片大小不能超过5MB');
+      return;
+    }
+    
+    // 创建预览
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (type === 'front') {
+        setFrontPhoto(file);
+        setFrontPhotoPreview(reader.result);
+      } else if (type === 'life1') {
+        setLifePhoto1(file);
+        setLifePhoto1Preview(reader.result);
+      } else if (type === 'life2') {
+        setLifePhoto2(file);
+        setLifePhoto2Preview(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // 处理动漫化生成
+  const handleAnimeGeneration = async () => {
+    setLoading(true);
+    setStep(6);
+    setProgress(0);
+    setProgressText('正在上传图片...');
+    
+    try {
+      // 上传图片并获取动漫化结果
+      const formData = new FormData();
+      formData.append('front_photo', frontPhoto);
+      formData.append('life_photo_1', lifePhoto1);
+      formData.append('life_photo_2', lifePhoto2);
+      
+      setProgress(30);
+      setProgressText('正在调用 AI 进行动漫化处理...');
+      
+      const result = await api.generateAnimeImages(formData);
+      
+      if (result.success && result.anime_images) {
+        setAnimeImages(result.anime_images);
+        setProgress(60);
+        setProgressText('动漫化完成，正在生成人格画像...');
+        
+        // 继续生成人格画像
+        await generateProfile();
+      } else {
+        const errorMsg = result.detail || result.error || result.message || '动漫化处理失败';
+        throw new Error(errorMsg);
+      }
+    } catch (error) {
+      console.error('Anime generation error:', error);
+      alert('动漫化处理失败: ' + error.message);
+      setStep(5);
+      setLoading(false);
     }
   };
 
@@ -134,7 +231,9 @@ export default function CreationWizard({ onClose, onComplete }) {
 
         chat_history: styleMode === 'upload' ? (chatHistory.length > 50000 ? chatHistory.substring(0, 50000) : chatHistory) : null,
         user_name: wechatName,
-        relationship: relationship
+        relationship: relationship,
+        // 动漫化图片
+        anime_images: animeMode === 'generate' ? animeImages : null
       };
 
       // 调用后端API生成画像
@@ -204,7 +303,9 @@ export default function CreationWizard({ onClose, onComplete }) {
         personality: generatedProfile.core_traits,
         speaking_style: generatedProfile.speaking_style,
         // 保存完整的生成数据
-        generated_profile: generatedProfile
+        generated_profile: generatedProfile,
+        // 保存动漫化图片
+        anime_images: animeImages || null
       };
 
       // 2. 保存数字孪生到用户数据
@@ -734,6 +835,159 @@ export default function CreationWizard({ onClose, onComplete }) {
     return null;
   };
 
+  // 渲染动漫化步骤
+  const renderAnimeStep = () => {
+    if (!animeMode) {
+      return (
+        <div className="grid grid-cols-2 gap-6 h-full">
+          <div
+            onClick={() => setAnimeMode('skip')}
+            className="border border-slate-700 bg-slate-800/50 rounded-xl p-6 cursor-pointer hover:border-slate-500 hover:bg-slate-800 transition-all flex flex-col items-center justify-center gap-4 group"
+          >
+            <div className="w-16 h-16 rounded-full bg-slate-700/30 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <ArrowRight className="w-8 h-8 text-slate-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-white">跳过</h3>
+            <p className="text-slate-400 text-center text-sm">暂不生成动漫形象</p>
+          </div>
+          <div
+            onClick={() => setAnimeMode('generate')}
+            className="border border-slate-700 bg-slate-800/50 rounded-xl p-6 cursor-pointer hover:border-purple-500 hover:bg-slate-800 transition-all flex flex-col items-center justify-center gap-4 group"
+          >
+            <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <ImageIcon className="w-8 h-8 text-purple-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-white">生成动漫化人物</h3>
+            <p className="text-slate-400 text-center text-sm">上传照片，AI 生成动漫形象</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (animeMode === 'skip') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center">
+          <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-6">
+            <ImageIcon className="w-10 h-10 text-slate-400" />
+          </div>
+          <h3 className="text-xl text-white mb-2">已准备好进入下一步</h3>
+          <p className="text-slate-400 max-w-xs">将跳过动漫化形象生成。</p>
+        </div>
+      );
+    }
+
+    if (animeMode === 'generate') {
+      return (
+        <div className="flex flex-col h-full gap-4 overflow-y-auto custom-scrollbar">
+          <div className="text-center mb-4">
+            <h3 className="text-lg text-white mb-2">上传照片生成动漫化人物</h3>
+            <p className="text-sm text-slate-400">请上传1张正面照和2张生活照（每张不超过5MB）</p>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-4">
+            {/* 正面照 */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-slate-400">正面照 *</label>
+              <div className="relative border-2 border-dashed border-slate-700 rounded-lg p-4 h-32 flex items-center justify-center bg-slate-900/50 hover:border-purple-500 transition-colors">
+                {frontPhotoPreview ? (
+                  <div className="relative w-full h-full">
+                    <img src={frontPhotoPreview} alt="正面照预览" className="w-full h-full object-cover rounded" />
+                    <button
+                      onClick={() => {
+                        setFrontPhoto(null);
+                        setFrontPhotoPreview(null);
+                      }}
+                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer flex flex-col items-center gap-2">
+                    <ImageIcon className="w-8 h-8 text-slate-500" />
+                    <span className="text-xs text-slate-400">点击上传</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e.target.files[0], 'front')}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            {/* 生活照1 */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-slate-400">生活照 1 *</label>
+              <div className="relative border-2 border-dashed border-slate-700 rounded-lg p-4 h-32 flex items-center justify-center bg-slate-900/50 hover:border-purple-500 transition-colors">
+                {lifePhoto1Preview ? (
+                  <div className="relative w-full h-full">
+                    <img src={lifePhoto1Preview} alt="生活照1预览" className="w-full h-full object-cover rounded" />
+                    <button
+                      onClick={() => {
+                        setLifePhoto1(null);
+                        setLifePhoto1Preview(null);
+                      }}
+                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer flex flex-col items-center gap-2">
+                    <ImageIcon className="w-8 h-8 text-slate-500" />
+                    <span className="text-xs text-slate-400">点击上传</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e.target.files[0], 'life1')}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            {/* 生活照2 */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-slate-400">生活照 2 *</label>
+              <div className="relative border-2 border-dashed border-slate-700 rounded-lg p-4 h-32 flex items-center justify-center bg-slate-900/50 hover:border-purple-500 transition-colors">
+                {lifePhoto2Preview ? (
+                  <div className="relative w-full h-full">
+                    <img src={lifePhoto2Preview} alt="生活照2预览" className="w-full h-full object-cover rounded" />
+                    <button
+                      onClick={() => {
+                        setLifePhoto2(null);
+                        setLifePhoto2Preview(null);
+                      }}
+                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer flex flex-col items-center gap-2">
+                    <ImageIcon className="w-8 h-8 text-slate-500" />
+                    <span className="text-xs text-slate-400">点击上传</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e.target.files[0], 'life2')}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   // 渲染生成结果
   const renderResult = () => {
     if (loading) {
@@ -839,6 +1093,10 @@ export default function CreationWizard({ onClose, onComplete }) {
       if (!styleMode) return true;
       if (styleMode === 'upload' && (!chatHistory || !wechatName)) return true;
     }
+    if (step === 5) {
+      if (!animeMode) return true;
+      if (animeMode === 'generate' && (!frontPhoto || !lifePhoto1 || !lifePhoto2)) return true;
+    }
     return false;
   };
 
@@ -857,9 +1115,9 @@ export default function CreationWizard({ onClose, onComplete }) {
         </div>
 
         {/* Progress Bar */}
-        {step < 5 && (
+        {step < 6 && (
           <div className="flex border-b border-slate-800 bg-slate-950/50">
-            {steps.slice(0, 4).map((s, i) => (
+            {steps.slice(0, 5).map((s, i) => (
               <div
                 key={i}
                 className={`flex-1 p-4 flex items-center justify-center gap-2 border-b-2 transition-colors ${step === i + 1
@@ -882,11 +1140,12 @@ export default function CreationWizard({ onClose, onComplete }) {
           {step === 2 && renderCoreStep()}
           {step === 3 && renderNuancedStep()}
           {step === 4 && renderStyleStep()}
-          {step === 5 && renderResult()}
+          {step === 5 && renderAnimeStep()}
+          {step === 6 && renderResult()}
         </div>
 
         {/* Footer */}
-        {step < 5 && (
+        {step < 6 && (
           <div className="p-6 border-t border-slate-800 flex justify-between bg-slate-900">
             <button
               onClick={() => {
@@ -894,6 +1153,7 @@ export default function CreationWizard({ onClose, onComplete }) {
                 else if (step === 2 && coreMode) setCoreMode(null);
                 else if (step === 3 && nuancedMode) setNuancedMode(null);
                 else if (step === 4 && styleMode) setStyleMode(null);
+                else if (step === 5 && animeMode) setAnimeMode(null);
                 else if (step > 1) setStep(step - 1);
                 else onClose();
               }}
@@ -908,13 +1168,13 @@ export default function CreationWizard({ onClose, onComplete }) {
               disabled={isNextDisabled()}
               className="bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold px-8 py-2 rounded-lg flex items-center gap-2 transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:shadow-[0_0_30px_rgba(6,182,212,0.6)]"
             >
-              {step === 4 ? '开始生成' : '下一步'}
+              {step === 5 ? '开始生成' : '下一步'}
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        {step === 5 && !loading && (
+        {step === 6 && !loading && (
           <div className="p-6 border-t border-slate-800 flex justify-center bg-slate-900">
             <button
               onClick={handleConfirm}

@@ -67,9 +67,19 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                 onClick={() => !chatStarted && onToggleAgent && onToggleAgent(twin)}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full ${twin.avatar} flex items-center justify-center text-xs font-bold shadow-lg`}>
-                    {twin.name.substring(0, 2)}
-                  </div>
+                  {twin.anime_images?.front ? (
+                    <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-purple-500/30 flex items-center justify-center shadow-lg">
+                      <img 
+                        src={twin.anime_images.front} 
+                        alt={twin.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className={`w-10 h-10 rounded-full ${twin.avatar} flex items-center justify-center text-xs font-bold shadow-lg`}>
+                      {twin.name.substring(0, 2)}
+                    </div>
+                  )}
                   <div className="flex-1">
                     <div className="flex justify-between items-center">
                       <span className="font-medium text-sm text-slate-200">{twin.name}</span>
@@ -118,9 +128,19 @@ export default function NeuralMatching({ matchedTwins = [], randomTwins = [], on
                 onClick={() => !chatStarted && onToggleAgent && onToggleAgent(twin)}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-full ${twin.avatar} grayscale group-hover:grayscale-0 flex items-center justify-center text-[10px] font-bold`}>
-                    {twin.name.substring(0, 1)}
-                  </div>
+                  {twin.anime_images?.front ? (
+                    <div className="w-8 h-8 rounded-full overflow-hidden border border-purple-500/30 grayscale group-hover:grayscale-0 flex items-center justify-center">
+                      <img 
+                        src={twin.anime_images.front} 
+                        alt={twin.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className={`w-8 h-8 rounded-full ${twin.avatar} grayscale group-hover:grayscale-0 flex items-center justify-center text-[10px] font-bold`}>
+                      {twin.name.substring(0, 1)}
+                    </div>
+                  )}
                   <div className="flex-1">
                     <div className="text-sm text-slate-300">{twin.name}</div>
                     <div className="text-[10px] text-slate-600">匹配度: {twin.match}%</div>

@@ -73,6 +73,28 @@ export const api = {
     return response.json();
   },
 
+  async generateAnimeImages(formData) {
+    const response = await fetch(`${API_BASE}/generate-anime-images`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = '动漫化处理失败';
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.detail || errorJson.message || errorMessage;
+      } catch (e) {
+        errorMessage = errorText || `服务器错误: ${response.status}`;
+      }
+      return { success: false, error: errorMessage, detail: errorMessage };
+    }
+    
+    return response.json();
+  },
+
   async getDigitalTwin() {
     const response = await fetch(`${API_BASE}/user/digital-twin`, {
       credentials: 'include'

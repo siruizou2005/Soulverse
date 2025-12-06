@@ -1,429 +1,661 @@
-## 项目总概
-自动从小说文本中提取所需信息，构建一个"活的"虚拟世界。在这个世界里，书中的角色（作为智能体）可以根据自己的目标和性格自主行动、互动，并"续写"出忠实于原作风格的新故事。
+# Soulverse
 
-## 为什么这样命名
+<div align="center">
 
-ScrollWeaver (织卷者) 是一个由指挥家 (Orchestrator) 和表演者 (Performer) 协同工作、响应玩家（执灯者）的行动，从而动态"编织"出独特故事（书卷）的魔法机器
+**基于多 Agent 模拟的"平行时空"社交沙盒**
+
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-14.2-black.svg)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[English](#introduction) | [中文](#项目概述)
+
+</div>
+
+---
+
+## 项目概述
+
+**Soulverse** 是一个创新的"平行时空"社交沙盒系统，基于 ScrollWeaver 多智能体引擎构建。每位用户都能基于兴趣图谱生成一个"AI 灵魂"（数字孪生 Agent），这个 AI 灵魂可以在虚拟世界中自主生活、结识同类，而用户既可以"零压力"观察，也能随时"灵魂降临"亲自互动。
+
+### 核心特性
+
+- 🎭 **观察者模式**：零压力社交，看着你的 AI 替你破冰、交友、生活
+- ⚡ **灵魂降临模式**：关键时刻一键接管，亲自改写剧情
+- 💫 **动态匹配**：基于 AI 互动产生的真实故事来寻找灵魂伴侣
+- 🧠 **三层人格模型**：内核层（认知与特质）、表象层（语言与行为模式）、记忆层（经历与关系）
+- 🌐 **多 Agent 社会系统**：从"单聊关系"升级为"世界级互动"
+- 📊 **社交故事生成**：自动生成社交互动故事和每日报告
+- 🔄 **持续运行**：支持长期运行（100+ 轮次），即使离线也在延续故事
+
+### 解决的问题
+
+- **社交启动困难**：解决"破冰"尴尬，降低社交消耗
+- **匹配质量肤浅**：用动态互动证据取代静态标签
+- **时间精力有限**：即使离线，AI 也在为你延续故事
+
+---
 
 ## Introduction
 
-ScrollWeaver is a comprehensive system for social simulation in fictional worlds through multi-agent interactions. The system features:
+**Soulverse** is an innovative "parallel universe" social sandbox system built on the ScrollWeaver multi-agent engine. Each user can generate an "AI soul" (digital twin Agent) based on their interest profile. This AI soul can autonomously live and interact in the virtual world, while users can either observe with "zero pressure" or "possess" the soul at any time for direct interaction.
 
-- Scene-based story progression with multiple character agents
-- Continuous updating of agent memories, status, and goals
-- World agent orchestration of the simulation
-- Support for human intervention and control
-- LLM-based story generation and refinement
+### Key Features
 
-## Setup
+- 🎭 **Observer Mode**: Zero-pressure social interaction, watch your AI break the ice, make friends, and live
+- ⚡ **Soul Possession Mode**: Take control at key moments, rewrite the story yourself
+- 💫 **Dynamic Matching**: Find soulmates based on real stories generated from AI interactions
+- 🧠 **Three-Layer Personality Model**: Core layer (cognition & traits), surface layer (language & behavior patterns), memory layer (experiences & relationships)
+- 🌐 **Multi-Agent Social System**: Upgrade from "single-chat relationships" to "world-level interactions"
+- 📊 **Social Story Generation**: Automatically generate social interaction stories and daily reports
+- 🔄 **Continuous Operation**: Supports long-term running (100+ rounds), stories continue even when offline
 
-### Step 1. Clone the repository
+---
+
+## 技术架构
+
+### 后端技术栈
+
+- **框架**: FastAPI + WebSocket
+- **多智能体引擎**: ScrollWeaver
+- **LLM 支持**: OpenAI, Gemini, DeepSeek, Claude, Qwen, Doubao, Ollama, VLLM 等
+- **向量数据库**: ChromaDB (用于 RAG 检索和长期记忆存储)
+- **嵌入模型**: BGE-small, 支持中英文
+- **会话管理**: Starlette SessionMiddleware
+
+### 前端技术栈
+
+- **框架**: Next.js 14 + React 18
+- **3D 渲染**: Three.js + React Three Fiber
+- **UI 库**: Tailwind CSS + Framer Motion
+- **图表**: Chart.js + D3.js
+- **Markdown**: React Markdown
+
+### 核心模块
+
+- **ScrollWeaver**: 多智能体模拟引擎核心
+- **Orchestrator**: 世界指挥家，负责场景调度和事件生成
+- **UserAgent**: 用户 Agent，基于兴趣图谱创建
+- **NPCAgent**: NPC Agent，预设模板或动态创建
+- **PersonalityModel**: 三层人格模型（内核层、表象层、记忆层）
+- **SocialStoryGenerator**: 社交故事生成器
+- **DailyReportGenerator**: 每日报告生成器
+- **NeuralMatching**: 神经匹配算法，基于兴趣、MBTI、社交目标
+
+---
+
+## 快速开始
+
+### 前置要求
+
+- Python 3.10+
+- Node.js 18+
+- npm 或 yarn
+- 至少一个 LLM API Key (OpenAI/Gemini/DeepSeek 等)
+
+### 安装步骤
+
+#### 1. 克隆仓库
+
 ```bash
-git clone https://github.com/your-repo/scrollweaver.git
-cd scrollweaver
+git clone https://github.com/Jinqitrip/Soulverse.git
+cd Soulverse
 ```
 
-### Step 2. Install dependencies
+#### 2. 安装 Python 依赖
 
-**Python dependencies:**
 ```bash
-conda create -n scrollweaver python=3.10
-conda activate scrollweaver
+# 创建虚拟环境（推荐）
+conda create -n soulverse python=3.10
+conda activate soulverse
+
+# 或使用 venv
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-**Frontend dependencies:**
+#### 3. 安装前端依赖
+
 ```bash
+cd frontend
 npm install
+cd ..
 ```
 
-**Docker:**
-```bash
-docker build -t scrollweaver .
-```
+#### 4. 配置
 
-### Step 3. Configure Simulation Settings
-Fill in the configuration parameters in `config.json`:
-  - `role_llm_name`: LLM model for character roles
-  - `world_llm_name`: LLM model for world simulation
-  - `preset_path`: The path to the experiment preset
-  - `if_save`: Enable/disable saving (1/0)
-  - `scene_mode`: Scene progression mode
-  - `rounds`: Number of simulation rounds
-  - `mode`: Simulation mode ("free" or "script")
+编辑 `config.json` 文件：
 
-Then enter the API key of the LLM provider you're using either in `config.json` or through the frontend interface.
-
-## Usage
-
-### Step 1. Start the server
-```bash
-python server.py
-```
-or
-```bash
-uvicorn server:app --host 127.0.0.1 --port 8001  
-```
-Docker
-```bash 
-docker run -p 8001:8001 scrollweaver
-```
-
-### Step 2. Access the web interface
-Open a browser and navigate to:
-- Local Python: http://localhost:8001
-- Local Docker: http://localhost:8001
-
-### Step 3. Interact with the system
-- Start/pause/stop story generation
-- View character information and map details
-- Monitor story progression and agent interactions
-- Edit generated content if needed
-
-### Step 4. Continue from previous simulation
-1. Locate the directory of the previous simulation within `/experiment_saves/`
-2. Set its path to the `save_dir` field in `config.json`. Ensure that the selected directory directly contains `server_info.json` and `orchestrator.json`.
-
-## Frontend Development
-
-### Development Mode
-Start the frontend development server:
-```bash
-npm run dev
-```
-Frontend will run at `http://localhost:3000`.
-
-Start the backend server (in another terminal):
-```bash
-python server.py
-```
-Backend will run at `http://localhost:8000` (or according to configured port).
-
-### Build Production Version
-```bash
-npm run build
-```
-Build output will be in the `dist/` directory.
-
-### Frontend Structure
-```
-frontend/
-  src/
-    components/     # React components
-    services/       # API services
-    App.jsx         # Main application component
-    main.jsx        # Entry file
-    index.css       # Global styles
-```
-
-### Frontend Features
-1. **Landing Page**: Welcome page shown on first visit
-2. **Login Page**: User login or guest mode
-3. **Universe Interface**: Main interface including:
-   - Neural matching sidebar (left)
-   - Central chat area
-   - Digital twin creation wizard
-   - User status display
-
-## Soulverse Mode
-
-### Overview
-Soulverse is a social sandbox mode that transforms the system from script-based role-playing to user-agent autonomous social interactions. The system supports two modes:
-
-- **Observer Mode**: View your Agent's autonomous activities in the virtual world
-- **Soul Possession Mode**: Fully control your Agent and participate in interactions
-
-### Key Features
-- **Social Scene Events**: Dynamic social scenarios based on Agent interests (e.g., book sharing sessions, coffee meetups)
-- **Social Motivation**: Motivation generation based on social goals and interests (not script-based)
-- **Continuous Operation**: Supports long-term running (100+ rounds)
-- **Social Story Generation**: Generate social interaction stories and daily reports
-
-### Creating User Agents
-
-1. **Open Soulverse Panel**
-   - Click the "Soulverse" tab in the right toolbar
-
-2. **Fill Information**
-   - User ID: Enter your user identifier (e.g., `user_001`)
-   - Agent Code: Enter unique Agent code (e.g., `my_agent_001`)
-
-3. **Create Agent**
-   - Click "Create Agent" button
-   - System automatically fetches your interest profile from Soul mock API (interests, MBTI, personality)
-   - Agent is automatically added to sandbox after creation
-
-### Observer Mode
-**Function**: View your Agent's autonomous activities in the virtual world
-
-**Usage Steps**:
-1. In the "Observer Mode" area of Soulverse panel
-2. Select your Agent from dropdown
-3. Click "View Social Story" to see recent 24-hour interaction records
-4. Click "View Daily Report" to see daily activity summary
-
-**View Content**:
-- Social Story: All interaction records of Agent, sorted chronologically
-- Social Daily Report: Contains summary, highlight events, interaction statistics, etc.
-
-### Soul Possession Mode
-**Function**: Fully control your Agent and participate in interactions
-
-**Usage Steps**:
-1. Select your Agent from left character list (or via "Select Character" button)
-2. System automatically detects this is a user Agent and enters Soul Possession mode
-3. When Agent needs action, system pauses and waits for your input
-4. Enter Agent's action/dialogue in input box
-5. Click "AI Auto Complete" button to get AI-suggested action options
-
-**Mode Switching**:
-- Click "Enter Soul Possession" button to manually switch mode
-- In Observer Mode, Agent acts autonomously, you can only view
-- In Soul Possession Mode, all Agent actions require your input
-
-### API Endpoints
-
-**Create User Agent:**
-```bash
-POST /api/create-user-agent
-Body: {
-  "user_id": "user_001",
-  "role_code": "my_agent_001",
-  "soul_profile": {...}  # Optional, auto-generated if not provided
+```json
+{
+    "role_llm_name": "gemini-2.5-flash-lite",
+    "world_llm_name": "gemini-2.5-flash-lite",
+    "embedding_model_name": "bge-small",
+    "preset_path": "./experiment_presets/soulverse_sandbox.json",
+    "if_save": 0,
+    "scene_mode": 1,
+    "rounds": 100,
+    "save_dir": "",
+    "mode": "free",
+    
+    "OPENAI_API_KEY": "your-openai-key",
+    "GEMINI_API_KEY": "your-gemini-key",
+    "DEEPSEEK_API_KEY": "your-deepseek-key"
 }
 ```
 
-**Get Social Story:**
+**配置说明**：
+- `role_llm_name`: Agent 使用的 LLM 模型
+- `world_llm_name`: 世界模拟使用的 LLM 模型
+- `embedding_model_name`: 嵌入模型名称（用于向量检索）
+- `preset_path`: 实验预设文件路径
+- `rounds`: 模拟轮次（Soulverse 模式建议 100+）
+- `mode`: 模拟模式（"free" 自由模式）
+
+### 运行项目
+
+#### 开发模式
+
+**启动后端服务器**：
 ```bash
-GET /api/get-social-story/{agent_code}?hours=24
+python server.py
+# 或
+uvicorn server:app --host 127.0.0.1 --port 8001
 ```
 
-**Get Daily Report:**
+**启动前端开发服务器**（新终端）：
 ```bash
-GET /api/get-daily-report/{agent_code}?date=2024-01-01
+cd frontend
+npm run dev
 ```
 
-### Soulverse Mode Detection
-System detects Soulverse mode through:
-- `source == "soulverse"`
-- `performer_codes` is empty list (indicating only user Agents)
+访问：
+- 前端：http://localhost:3000
+- 后端 API：http://localhost:8001
+- API 文档：http://localhost:8001/docs
 
-### Differences: Script Mode vs Soulverse Mode
+#### 生产模式
 
-| Feature | Script Mode | Soulverse Mode |
-|---------|-------------|----------------|
-| World Setting | Novel world (e.g., Game of Thrones) | Modern social scenes (cafes, libraries, etc.) |
-| Character Source | Preset novel characters | User-created Agents |
-| Event Type | Script events (e.g., Red Wedding) | Social scene events (e.g., book sharing) |
-| Motivation | Based on script and events | Based on social goals and interests |
-| Operation | Fixed rounds | Continuous operation (100+ rounds) |
-| Goal | Advance script plot | Build social relationships |
-
-## Customization
-
-### Construct Your Virtual World Manually
-1. Create the roles, map, worldbuilding following the examples given in `/data/`. Additionally, you can place an image named `icon.(png/jpg)` inside the character's folder — this will be used as the avatar displayed in the interface.
-2. You can improve the simulation quality by providing background settings about the world in `world_details/` or put character dialogue lines in `role_lines.jsonl`. 
-3. Enter the preset path to `preset_path` in `config.json`.
-
-### Extract Role, Location, and Setting Data Automatically
-
-Utilize the script provided in `/extract_data/` to extract key story elements using LLMs.
-
-<font color="red">
-⚠️ Note: We are sorry that the extraction code is currently unstable and may not produce reliable results. We recommend manually entering the character profiles and descriptions, or using data from sources such as Wikipedia. You can quickly generate a template for location and character information by setting <code>if_auto_extract</code> to 0 in <code>extract_config.json</code>.
-</font>
-<br><br>
-
-**1. Configure the extraction model and API key in `extract_config.json`:**
-
-* `book_path`: Path to the input book file. We currently support `.epub` (recommended), `.pdf`, and `.txt` formats.
-* `language`: The language of the book (e.g., `en`, `zh`). If not specified, the program will attempt to detect it automatically.
-* `book_source`: The title or name of the book. If omitted, the program will try to infer it from the file.
-* `target_character_names`: A list of characters to extract information about. It's best to use names or nicknames that appear most frequently in the text, rather than full formal names. If not provided, the program will attempt to extract them automatically. **For higher-quality results, we strongly recommend specifying this field.**
-* `target_location_names`: A list of important locations. Again, using the most frequently occurring name or common synonym improves accuracy. If omitted, locations will be extracted automatically. **For higher-quality results, we strongly recommend specifying this field.**
-
-**2. Run the script**
-
-  Characters and Locations
-
-  ```bash
-  python extract_data.py
-  ``` 
-
-  Settings
-
-  ```bash
-  python extract_settings.py
-  ```
-
-### Convert SillyTavern Character Cards to Role Data
-
-1. Put your character cards in `/data/sillytavern_cards/`.
-2. Run the script. It will convert all the cards into the role data that ScrollWeaver needs.
+**构建前端**：
 ```bash
-python convert_sillytavern_cards_to_data.py
+cd frontend
+npm run build
 ```
-3. Input role codes of all the characters participating in this simulation to `performer_codes` in the preset file.
 
-### Preset Agents Migration
+**启动生产服务器**：
+```bash
+python server.py
+```
 
-All preset templates (`modules/preset_agents.py`) use the new three-layer personality model format:
+访问：http://localhost:8001
 
-1. **preset_001 - Literary Youth** (INFP)
-2. **preset_002 - Tech Geek** (INTP)
-3. **preset_003 - Sports Enthusiast** (ESFP)
-4. **preset_004 - Artistic Creator** (ENFP)
-5. **preset_005 - Food Explorer** (ISFP)
-6. **preset_006 - Philosophical Thinker** (INFJ)
+#### Docker 部署
 
-**Create Preset Agent via API:**
+```bash
+docker build -t soulverse .
+docker run -p 8001:8001 soulverse
+```
+
+---
+
+## 使用指南
+
+### 1. 用户注册/登录
+
+- 访问登录页面
+- 支持用户注册或访客模式
+- 访客模式会自动生成临时用户 ID
+
+### 2. 创建数字孪生 Agent
+
+#### 方式一：通过 Soul API（模拟）
+
+```bash
+POST /api/create-user-agent
+{
+    "user_id": "user_001",
+    "role_code": "my_agent_001"
+}
+```
+
+系统会自动从 Soul mock API 获取用户画像（兴趣、MBTI、人格等）。
+
+#### 方式二：从文本提取
+
+```bash
+POST /api/create-agent-from-text
+{
+    "user_id": "user_001",
+    "role_code": "my_agent_002",
+    "text": "用户提供的文本描述..."
+}
+```
+
+#### 方式三：从文件上传
+
+```bash
+POST /api/create-agent-from-file
+FormData:
+    - user_id: "user_001"
+    - role_code: "my_agent_003"
+    - file: <file>
+```
+
+#### 方式四：通过问答
+
+```bash
+POST /api/create-agent-from-qa
+{
+    "user_id": "user_001",
+    "role_code": "my_agent_004",
+    "answers": {
+        "q1": "answer1",
+        "q2": "answer2"
+    }
+}
+```
+
+### 3. 观察者模式
+
+**功能**：查看你的 Agent 在虚拟世界中的自主活动
+
+**使用步骤**：
+1. 在 Soulverse 面板的"观察者模式"区域
+2. 从下拉菜单选择你的 Agent
+3. 点击"查看社交故事"查看最近 24 小时的互动记录
+4. 点击"查看每日报告"查看每日活动摘要
+
+**查看内容**：
+- **社交故事**：Agent 的所有互动记录，按时间排序
+- **每日报告**：包含摘要、亮点事件、互动统计等
+
+### 4. 灵魂降临模式
+
+**功能**：完全控制你的 Agent 并参与互动
+
+**使用步骤**：
+1. 从左侧角色列表选择你的 Agent（或通过"选择角色"按钮）
+2. 系统自动检测这是用户 Agent 并进入灵魂降临模式
+3. 当 Agent 需要行动时，系统暂停并等待你的输入
+4. 在输入框中输入 Agent 的行动/对话
+5. 点击"AI 自动补全"按钮获取 AI 建议的行动选项
+
+**模式切换**：
+- 点击"进入灵魂降临"按钮手动切换模式
+- 观察者模式：Agent 自主行动，你只能查看
+- 灵魂降临模式：所有 Agent 行动都需要你的输入
+
+### 5. 神经匹配
+
+**功能**：基于兴趣、MBTI、社交目标匹配最合适的 Agent
+
+```bash
+POST /api/neural-match
+{
+    "user_id": "user_001"
+}
+```
+
+返回：
+- Top 3 完美共振 Agent
+- 2 个随机邂逅 Agent
+
+### 6. 添加预设 NPC
+
 ```bash
 POST /api/add-preset-npc
 {
-  "preset_id": "preset_001",
-  "custom_name": "Custom Name (optional)",
-  "role_code": "Custom role_code (optional)"
+    "preset_id": "preset_001",  # 预设模板 ID
+    "custom_name": "自定义名称（可选）",
+    "role_code": "自定义 role_code（可选）"
 }
 ```
 
-**New Format Features:**
-Each newly created preset Agent includes:
-1. **Three-layer personality model data** (`personality_profile`)
-   - Core layer: MBTI, Big Five, values, defense mechanisms
-   - Surface layer: Language style matrix (sentence length, vocabulary, punctuation, expressions, catchphrases, etc.)
-   - Memory layer: Dynamic state (mood, energy value, relationship mapping)
-2. **Few-Shot samples** (`style_examples`) - Dialogue samples for style learning
-3. **Language style vector database** (`style_vector_db_name`) - For retrieving historical speech styles
+**可用预设模板**：
+- `preset_001`: 文艺青年 (INFP)
+- `preset_002`: 科技极客 (INTP)
+- `preset_003`: 运动爱好者 (ESFP)
+- `preset_004`: 艺术创作者 (ENFP)
+- `preset_005`: 美食探索家 (ISFP)
+- `preset_006`: 哲学思考者 (INFJ)
 
-## Testing
+---
 
-### Test Examples
+## API 文档
 
-**Basic Social Interaction:**
-Create two user Agents with similar interests, observe how they meet in a cafe and establish connections.
+### 用户管理
 
-**Different Interest Agent Exploration:**
-Create three Agents with different interests, observe how they explore and interact in different scenarios.
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/login` | POST | 用户登录（支持访客模式） |
+| `/api/register` | POST | 用户注册 |
+| `/api/logout` | POST | 用户退出登录 |
+| `/api/user/me` | GET | 获取当前用户信息 |
 
-**Social Story Generation:**
-After running a simulation, generate social stories and daily reports for specific Agents.
+### Agent 管理
 
-Run test script:
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/create-user-agent` | POST | 创建用户 Agent |
+| `/api/create-agent-from-text` | POST | 从文本创建 Agent |
+| `/api/create-agent-from-file` | POST | 从文件创建 Agent |
+| `/api/create-agent-from-qa` | POST | 通过问答创建 Agent |
+| `/api/add-preset-npc` | POST | 添加预设 NPC |
+| `/api/toggle-agent-sandbox` | POST | 切换 Agent 沙盒状态 |
+| `/api/restore-user-agent` | POST | 恢复用户 Agent |
+
+### 数字孪生
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/user/digital-twin` | POST | 创建/更新数字孪生 |
+| `/api/user/digital-twin` | GET | 获取数字孪生信息 |
+| `/api/generate-digital-twin-profile` | POST | 生成数字孪生完整画像 |
+
+### 社交功能
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/get-social-story/{agent_code}` | GET | 获取社交故事（支持 hours 参数） |
+| `/api/get-daily-report/{agent_code}` | GET | 获取每日报告（支持 date 参数） |
+| `/api/neural-match` | POST | 神经匹配算法 |
+| `/api/list-preset-agents` | GET | 列出所有预设 Agent |
+
+### 聊天功能
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/ws/{client_id}` | WebSocket | WebSocket 连接（实时聊天） |
+| `/api/start-1on1-chat` | POST | 启动一对一聊天 |
+| `/api/clear-chat-history` | POST | 清空聊天历史 |
+
+### 系统管理
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/reset-sandbox` | POST | 重置沙盒 |
+| `/api/reset-all` | POST | 重置所有 |
+| `/api/save-config` | POST | 保存配置 |
+| `/api/list-presets` | GET | 列出所有预设 |
+| `/api/load-preset` | POST | 加载预设 |
+
+完整的 API 文档可在运行服务器后访问：http://localhost:8001/docs
+
+---
+
+## 项目结构
+
+```
+Soulverse/
+├── data/                          # 数据目录
+│   ├── preset_agents/            # 预设 Agent 数据
+│   │   ├── preset_agents.json    # 预设模板 JSON
+│   │   └── preset_embeddings.pkl # 预设嵌入向量
+│   ├── users/                    # 用户数据目录
+│   ├── roles/                    # 角色数据
+│   │   ├── soulverse_npcs/      # NPC 角色
+│   │   └── soulverse_users/     # 用户角色
+│   ├── locations/                # 地点数据
+│   ├── maps/                     # 地图数据
+│   └── worlds/                   # 世界配置
+│       └── soulverse_sandbox/    # Soulverse 沙盒世界
+├── frontend/                      # 前端代码
+│   ├── app/                      # Next.js App Router
+│   │   ├── page.tsx             # 首页
+│   │   ├── login/                # 登录页
+│   │   └── universe/             # 主界面
+│   ├── components/               # React 组件
+│   │   ├── ChatInterface.jsx    # 聊天界面
+│   │   ├── CreationWizard.jsx   # 创建向导
+│   │   ├── NeuralMatching.jsx   # 神经匹配
+│   │   ├── UserAgentStatus.jsx  # 用户 Agent 状态
+│   │   └── UniverseView.jsx      # 宇宙视图
+│   ├── services/                 # API 服务
+│   │   └── api.js               # API 客户端
+│   ├── data/                     # 前端数据
+│   │   └── questionnaires.js    # 问卷数据
+│   └── package.json             # 前端依赖
+├── modules/                       # 核心模块
+│   ├── core/                     # 核心工具
+│   ├── db/                       # 数据库模块
+│   │   ├── BaseDB.py           # 数据库基类
+│   │   └── ChromaDB.py          # ChromaDB 实现
+│   ├── llm/                      # LLM 适配器
+│   │   ├── BaseLLM.py           # LLM 基类
+│   │   ├── OpenAI.py            # OpenAI 适配器
+│   │   ├── Gemini.py            # Gemini 适配器
+│   │   ├── DeepSeek.py          # DeepSeek 适配器
+│   │   └── ...                   # 其他 LLM 适配器
+│   ├── prompt/                   # 提示词模板
+│   │   ├── orchestrator_prompt_zh.py
+│   │   ├── orchestrator_prompt_en.py
+│   │   ├── performer_prompt_zh.py
+│   │   └── performer_prompt_en.py
+│   ├── user_agent.py            # 用户 Agent 类
+│   ├── npc_agent.py             # NPC Agent 类
+│   ├── orchestrator.py          # 指挥家类
+│   ├── main_performer.py        # 表演者基类
+│   ├── personality_model.py     # 三层人格模型
+│   ├── soulverse_mode.py        # Soulverse 模式逻辑
+│   ├── social_story_generator.py # 社交故事生成器
+│   ├── daily_report.py          # 每日报告生成器
+│   ├── preset_agents.py         # 预设 Agent 管理
+│   └── profile_extractor.py     # 画像提取器
+├── experiment_presets/           # 实验预设配置
+│   ├── soulverse_sandbox.json   # Soulverse 沙盒预设
+│   └── soulverse_1on1.json     # 一对一对话预设
+├── extract_data/                 # 数据提取工具
+│   ├── extract_data.py          # 提取角色和地点
+│   ├── extract_settings.py      # 提取世界设定
+│   └── extract_config.json      # 提取配置
+├── ScrollWeaver.py              # ScrollWeaver 核心引擎
+├── server.py                     # FastAPI 服务器
+├── config.json                   # 配置文件
+├── requirements.txt              # Python 依赖
+├── Dockerfile                    # Docker 配置
+└── README.md                     # 本文档
+```
+
+---
+
+## 核心概念
+
+### 三层人格模型
+
+Soulverse 采用创新的三层人格模型来构建 Agent 的个性：
+
+1. **内核层（Core Layer）**
+   - MBTI 类型
+   - 大五人格（Big Five）
+   - 价值观（Values）
+   - 防御机制（Defense Mechanisms）
+
+2. **表象层（Surface Layer）**
+   - 语言风格矩阵
+     - 句长偏好（短句/中句/长句）
+     - 词汇等级（学术/口语/网络用语）
+     - 标点习惯（少用/标准/频繁）
+     - 表情使用频率
+   - 口头禅列表
+   - Few-Shot 样本
+
+3. **记忆层（Memory Layer）**
+   - 动态状态（心情、能量值）
+   - 关系映射（与其他 Agent 的关系）
+   - 长期记忆（ChromaDB 向量存储）
+   - 短期记忆（最近互动）
+
+### ScrollWeaver 架构
+
+ScrollWeaver 是多智能体模拟的核心引擎：
+
+- **Server**: 系统服务器，管理所有 Agent 和世界状态
+- **Orchestrator**: 世界指挥家，负责场景调度、事件生成
+- **Performer**: 表演者基类，所有 Agent 的父类
+  - **UserAgent**: 用户 Agent，基于兴趣图谱
+  - **NPCAgent**: NPC Agent，预设模板或动态创建
+- **HistoryManager**: 历史管理器，记录所有互动
+- **TimeSimulator**: 时间模拟器（默认 60 倍速：1 分钟 = 1 小时）
+
+### Soulverse 模式
+
+Soulverse 模式是专为社交沙盒设计的模式：
+
+- **强制启用**：系统默认启用 Soulverse 模式
+- **动态 Agent**：所有 Agent 通过 API 动态添加
+- **社交场景**：基于兴趣生成社交场景事件
+- **社交动机**：基于社交目标和兴趣生成动机（非剧本）
+- **持续运行**：支持长期运行（100+ 轮次）
+
+---
+
+## 自定义与扩展
+
+### 创建自定义预设 Agent
+
+1. 编辑 `data/preset_agents/preset_agents.json`
+2. 添加新的预设模板：
+
+```json
+{
+    "id": "preset_007",
+    "name": "自定义名称",
+    "icon": "🎨",
+    "description": "描述",
+    "interests": ["兴趣1", "兴趣2"],
+    "mbti": "ENFP",
+    "personality": "人格描述",
+    "social_goals": ["社交目标1"],
+    "big_five": {
+        "openness": 0.8,
+        "conscientiousness": 0.6,
+        "extraversion": 0.7,
+        "agreeableness": 0.8,
+        "neuroticism": 0.4
+    },
+    "values": ["价值1", "价值2"],
+    "defense_mechanism": "Sublimation"
+}
+```
+
+3. 通过 API 创建：
+
+```bash
+POST /api/add-preset-npc
+{
+    "preset_id": "preset_007"
+}
+```
+
+### 添加新的 LLM 适配器
+
+1. 在 `modules/llm/` 目录创建新文件
+2. 继承 `BaseLLM` 类
+3. 实现必要的方法
+4. 在 `sw_utils.py` 的 `get_models()` 函数中注册
+
+### 自定义世界设定
+
+1. 编辑 `data/worlds/soulverse_sandbox/general.json`
+2. 修改世界描述、规则等
+3. 重启服务器
+
+---
+
+## 测试
+
+### 运行测试脚本
+
 ```bash
 python test_soulverse.py
 ```
 
-### Verification Points
+### 测试场景
 
-1. **Soulverse Mode Detection**: Confirm `scrollweaver.server.is_soulverse_mode == True`
-2. **Motivation Generation**: Confirm UserAgent's motivation contains social goals
-3. **Agent Behavior**: Confirm Agents choose scenes based on interests and actively interact
-4. **Social Stories**: Confirm stories focus on social interactions with accurate statistics
+1. **基础社交互动**：创建两个兴趣相似的用户 Agent，观察他们在咖啡馆相遇并建立联系
+2. **不同兴趣 Agent 探索**：创建三个兴趣不同的 Agent，观察他们在不同场景中的探索和互动
+3. **社交故事生成**：运行模拟后，为特定 Agent 生成社交故事和每日报告
 
-## Implementation Summary
+### 验证要点
 
-### Completed Work
+1. **Soulverse 模式检测**：确认 `scrollweaver.server.is_soulverse_mode == True`
+2. **动机生成**：确认 UserAgent 的动机包含社交目标
+3. **Agent 行为**：确认 Agent 基于兴趣选择场景并积极互动
+4. **社交故事**：确认故事聚焦社交互动并包含准确的统计数据
 
-1. **Project Infrastructure Setup** ✅
-   - Created `package.json` for React project configuration
-   - Configured Vite as build tool
-   - Set up Tailwind CSS and PostCSS
-   - Created frontend entry files and style files
+---
 
-2. **Preset Agents Extraction** ✅
-   - Extracted preset data from `modules/preset_agents.py` to `data/preset_agents/preset_agents.json`
-   - Modified `modules/preset_agents.py` to load presets from JSON file (backward compatible)
+## 常见问题
 
-3. **User Session Management System** ✅
-   - Created `data/users/` directory for storing user data
-   - Implemented API endpoints: login, register, user info, digital twin management
-   - Used Starlette SessionMiddleware for session management
-   - User data stored as JSON in `data/users/{user_id}.json`
+### Q: Agent Code 必须唯一吗？
 
-4. **Neural Matching API** ✅
-   - Implemented `POST /api/neural-match` endpoint
-   - Uses simplified matching algorithm to calculate compatibility between user digital twin and preset agents
-   - Returns Top 3 perfect resonance and 2 random encounters
-   - Matching algorithm based on interest similarity, MBTI compatibility, and social goal matching
+A: 是的，Agent Code 必须全局唯一。如果创建时使用已存在的 Code，会返回错误。
 
-5. **React Frontend Components** ✅
-   - Created components: CosmicBackground, CreationWizard, LandingPage, LoginPage, UniverseView, NeuralMatching, ChatInterface, UserAgentStatus, App
+### Q: 时间加速比例是多少？
 
-6. **API Services** ✅
-   - Created `frontend/src/services/api.js` to manage all API calls
-   - Includes user authentication, digital twin management, neural matching, Agent creation, etc.
+A: 默认是 60 倍速，即 1 实际分钟 = 1 虚拟小时。可在 `TimeSimulator` 中修改。
 
-7. **Soulverse Mode Implementation** ✅
-   - Created `modules/soulverse_mode.py` for Soulverse-specific logic
-   - Refactored UserAgent class to use Soulverse mode social motivation
-   - Modified ScrollWeaver core logic to support Soulverse mode
-   - Created Soulverse world configuration files
+### Q: 支持多用户吗？
 
-## Directory Structure
+A: 是的，多个用户 Agent 可以在同一个沙盒中互动。
 
-```
-.
-├── data/
-│   ├── preset_agents/     # Preset agent data
-│   ├── users/             # User data directory
-│   ├── roles/             # Character roles
-│   ├── locations/         # Location data
-│   ├── maps/              # Map data
-│   └── worlds/            # World configurations
-├── frontend/
-│   ├── assets/
-│   ├── css/
-│   ├── js/
-│   └── src/
-│       ├── components/    # React components
-│       ├── services/      # API services
-│       ├── App.jsx
-│       └── main.jsx
-├── modules/
-│   ├── db/
-│   ├── llm/
-│   ├── prompt/
-│   ├── soulverse_mode.py  # Soulverse mode logic
-│   ├── user_agent.py      # User agent implementation
-│   ├── main_performer.py
-│   └── orchestrator.py
-├── experiment_presets/     # Experiment preset configurations
-├── ScrollWeaver.py
-├── server.py
-├── config.json
-└── index.html
-```
+### Q: 数据会持久化保存吗？
 
-## Known Issues & Improvements
+A: 当前版本数据会保存到 `data/` 目录，但重启后需要重新加载。生产环境建议使用数据库。
 
-### High Priority Improvements
-1. **Mode Status Display**: Show current mode (Observer/Soul Possession) at top of interface
-2. **Auto-refresh After Agent Creation**: Character list automatically updates
-3. **Time Control Panel**: Add time acceleration and pause functionality
+### Q: 如何切换 LLM 模型？
 
-### Medium Priority Improvements
-4. **Social Story Timeline View**: More user-friendly display
-5. **Mode Switching Optimization**: Smoother switching experience
-6. **Agent Creation Flow Optimization**: Auto-generate codes and preview
+A: 修改 `config.json` 中的 `role_llm_name` 和 `world_llm_name`，并确保对应的 API Key 已配置。
 
-### Low Priority Improvements
-7. **Relationship Network Visualization**: Social network graph
-8. **Real-time Notification System**: Push important events
-9. **Data Analysis Panel**: Deeper statistics and analysis
+### Q: WebSocket 连接失败怎么办？
 
-## Notes
+A: 检查后端服务器是否正常运行，端口是否正确，以及防火墙设置。
 
-1. **Agent Code Must Be Unique**: Creation will fail if Agent code already exists
-2. **Time Acceleration**: System default is 1 real minute = 1 virtual hour (60x speed)
-3. **Multi-user Support**: Multiple user Agents can interact in the same sandbox
-4. **Data Persistence**: Currently demo version, data is not persistently saved
-5. **WebSocket Connection**: Requires backend support
-6. **Soulverse Mode**: System automatically detects Soulverse mode through `source == "soulverse"` or empty `performer_codes`
+---
 
-## Authors and Citation
-**Authors:** Yiting Ran, Xintao Wang, Tian Qiu,
-Jiaqing Liang, Yanghua Xiao, Deqing Yang.
+## 已知问题与改进计划
+
+### 高优先级
+
+- [ ] 模式状态显示：在界面顶部显示当前模式（观察者/灵魂降临）
+- [ ] Agent 创建后自动刷新：角色列表自动更新
+- [ ] 时间控制面板：添加时间加速和暂停功能
+
+### 中优先级
+
+- [ ] 社交故事时间线视图：更友好的显示方式
+- [ ] 模式切换优化：更流畅的切换体验
+- [ ] Agent 创建流程优化：自动生成 Code 和预览
+
+### 低优先级
+
+- [ ] 关系网络可视化：社交网络图
+- [ ] 实时通知系统：推送重要事件
+- [ ] 数据分析面板：更深入的统计和分析
+
+---
+
+## 贡献指南
+
+我们欢迎所有形式的贡献！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+---
+
+## 作者与引用
+
+**作者**: Yiting Ran, Xintao Wang, Tian Qiu, Jiaqing Liang, Yanghua Xiao, Deqing Yang
+
+**论文引用**:
 
 ```bibtex
 @inproceedings{ran2025scrollweaver,
@@ -435,8 +667,36 @@ Jiaqing Liang, Yanghua Xiao, Deqing Yang.
 }
 ```
 
-## Contact
+---
 
-ScrollWeaver is a foundational framework that we aim to continuously optimize and enrich with custom modules. We welcome and greatly appreciate your suggestions and contributions!
+## 许可证
 
-If you have any suggestions or would like to contribute, please contact us at: alienet1109@163.com
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+
+---
+
+## 联系方式
+
+Soulverse 是一个基础框架，我们致力于持续优化和丰富自定义模块。我们非常欢迎您的建议和贡献！
+
+如有任何建议或想要贡献，请联系我们：**alienet1109@163.com**
+
+---
+
+## 致谢
+
+- [ScrollWeaver](https://github.com/Jinqitrip/Soulverse) - 多智能体模拟引擎
+- [FastAPI](https://fastapi.tiangolo.com/) - 现代 Web 框架
+- [Next.js](https://nextjs.org/) - React 框架
+- [Three.js](https://threejs.org/) - 3D 图形库
+- [ChromaDB](https://www.trychroma.com/) - 向量数据库
+
+---
+
+<div align="center">
+
+**准备好开启你的平行人生了吗？** 🚀
+
+[开始使用](#快速开始) | [查看文档](#使用指南) | [贡献代码](#贡献指南)
+
+</div>

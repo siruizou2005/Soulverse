@@ -127,6 +127,42 @@ export default function UserAgentStatus({ isOpen, onClose, agentData = null }) {
                   </div>
                 </div>
 
+                {/* 动漫化图片展示 */}
+                {agentInfo.anime_images && (
+                  <div className="w-full mb-6">
+                    <h4 className="text-sm text-slate-400 mb-3 text-center">动漫化形象</h4>
+                    <div className="grid grid-cols-3 gap-2">
+                      {agentInfo.anime_images.front && (
+                        <div className="relative aspect-square rounded-lg overflow-hidden border-2 border-purple-500/30">
+                          <img 
+                            src={agentInfo.anime_images.front} 
+                            alt="正面照" 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                      {agentInfo.anime_images.life1 && (
+                        <div className="relative aspect-square rounded-lg overflow-hidden border-2 border-purple-500/30">
+                          <img 
+                            src={agentInfo.anime_images.life1} 
+                            alt="生活照1" 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                      {agentInfo.anime_images.life2 && (
+                        <div className="relative aspect-square rounded-lg overflow-hidden border-2 border-purple-500/30">
+                          <img 
+                            src={agentInfo.anime_images.life2} 
+                            alt="生活照2" 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0">
                   {bigFiveData ? (
                     <PersonalityRadar data={bigFiveData} />

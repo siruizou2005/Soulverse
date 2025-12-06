@@ -153,7 +153,8 @@ export default function UniverseView({ user }) {
           description: match.role,
           role_code: null,  // ← 初始为 null，将由 addMatchedAgentsToSandbox 更新
           preset_id: match.preset?.id,
-          disabled: false
+          disabled: false,
+          anime_images: match.anime_images || null // 保留动漫化图片信息
         }));
 
         // 确保我们有5个推荐
