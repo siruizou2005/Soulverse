@@ -237,7 +237,7 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
 
     // 发送用户输入
     ws.send(JSON.stringify({
-      type: 'user_message',  // 注意：后端期望的是 'user_message' 而不是 'user_input'
+      type: 'user_input',  // 后端期望的是 'user_input'
       text: inputText.trim()
     }));
 

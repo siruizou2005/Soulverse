@@ -8,6 +8,9 @@
     "rounds": 10,
     "save_dir": "",
     "mode": "free",
+    "user_input_timeout": 60,
+    "user_input_timeout_warning_seconds": 10,
+    "user_input_timeout_reminder_intervals": [30, 15, 10],
 
     "OPENAI_API_KEY":"REDACTED_OPENAI_KEY",
     "OPENAI_API_BASE":"https://www.chataiapi.com/v1",

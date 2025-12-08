@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 import uuid
 import os
 from datetime import datetime, timedelta
+from functools import partial
 from ScrollWeaver import ScrollWeaver
 from sw_utils import is_image, load_json_file
 
@@ -67,7 +68,15 @@ class Room:
     async def connect(self, websocket: WebSocket, client_id: str, user_id: str = None):
         await websocket.accept()
         self.active_connections[client_id] = websocket
-        self.last_empty_time = None # Active now
+        
+        # If room was empty, mark as active and resume story loop if needed
+        was_empty = self.last_empty_time is not None
+        self.last_empty_time = None  # Active now
+        
+        if was_empty:
+            print(f"[Room {self.room_id}] Client {client_id} connected, room was empty, resuming story loop")
+            # Ensure story loop is running
+            await self.start_story_loop()
         
         if user_id:
             # Check if this user already has an assigned agent in this room
@@ -82,41 +91,86 @@ class Room:
                 self.user_client_map[user_id] = set()
             self.user_client_map[user_id].add(client_id)
         
-    def disconnect(self, client_id: str):
+    async def disconnect(self, client_id: str):
+        """断开客户端连接并清理相关状态"""
+        was_waiting_input = client_id in self.waiting_for_input and self.waiting_for_input.get(client_id, False)
+        role_code = self.user_selected_roles.get(client_id)
+        
         if client_id in self.active_connections:
             del self.active_connections[client_id]
             
         if not self.active_connections:
             self.last_empty_time = datetime.now()
+            print(f"[Room {self.room_id}] All clients disconnected, room is now empty")
         
-        # If no clients left, maybe stop the story task?
-        # For now, we clean up client specific state
+        # Clean up client specific state
         if client_id in self.user_selected_roles:
             del self.user_selected_roles[client_id]
-            # Broadcast updated selection map asynchronously
+            # Broadcast updated selection map - ensure it succeeds
             try:
-                asyncio.create_task(self.broadcast_json({'type': 'role_selection_map', 'data': self.user_selected_roles}))
-            except Exception:
-                pass
+                await self.broadcast_json({'type': 'role_selection_map', 'data': self.user_selected_roles})
+            except Exception as e:
+                print(f"[Room {self.room_id}] Error broadcasting role selection map on disconnect: {e}")
+        
+        # If client was waiting for input, trigger timeout handling
+        if was_waiting_input and client_id in self.pending_user_inputs:
+            future = self.pending_user_inputs[client_id]
+            if not future.done():
+                # Cancel the future to trigger timeout handling
+                future.cancel()
+                # Notify other users that this user disconnected
+                try:
+                    await self.broadcast_json({
+                        'type': 'system',
+                        'data': {'message': f'用户已断开连接，已自动使用AI回复'}
+                    })
+                except Exception as e:
+                    print(f"[Room {self.room_id}] Error broadcasting disconnect notification: {e}")
+        
         if client_id in self.waiting_for_input:
             del self.waiting_for_input[client_id]
         if client_id in self.pending_user_inputs:
             if not self.pending_user_inputs[client_id].done():
                 self.pending_user_inputs[client_id].cancel()
             del self.pending_user_inputs[client_id]
+        
+        if client_id in self.possession_mode:
+            del self.possession_mode[client_id]
+        
+        print(f"[Room {self.room_id}] Client {client_id} disconnected (was waiting input: {was_waiting_input})")
 
     async def broadcast_json(self, data: dict):
         """Send JSON to all connected clients"""
+        if not self.active_connections:
+            print(f"[Room {self.room_id}] Warning: broadcast_json called but no active connections")
+            return
+            
         disconnected = []
-        for cid, ws in self.active_connections.items():
+        for cid, ws in list(self.active_connections.items()):  # Use list() to avoid modification during iteration
             try:
                 await ws.send_json(data)
             except Exception as e:
-                print(f"Error broadcasting to {cid}: {e}")
+                print(f"[Room {self.room_id}] Error broadcasting to {cid}: {e}")
                 disconnected.append(cid)
         
+        # Disconnect clients that failed - do this synchronously to avoid recursion
         for cid in disconnected:
-            self.disconnect(cid)
+            if cid in self.active_connections:
+                del self.active_connections[cid]
+            if not self.active_connections:
+                self.last_empty_time = datetime.now()
+            
+            # Clean up client state without async broadcast to avoid recursion
+            if cid in self.user_selected_roles:
+                del self.user_selected_roles[cid]
+            if cid in self.waiting_for_input:
+                del self.waiting_for_input[cid]
+            if cid in self.pending_user_inputs:
+                if not self.pending_user_inputs[cid].done():
+                    self.pending_user_inputs[cid].cancel()
+                del self.pending_user_inputs[cid]
+            if cid in self.possession_mode:
+                del self.possession_mode[cid]
 
     async def cleanup(self):
         """Cleanup room resources"""
@@ -162,49 +216,202 @@ class Room:
         while attempts < max_attempts:
             try:
                 # 同步当前房间中被用户选中的角色到 ScrollWeaver，使其可识别多用户占位符
+                # 在消息生成前立即同步，减少竞态条件窗口
+                sync_success = False
                 try:
                     selected = set(self.user_selected_roles.values()) if self.user_selected_roles else set()
                     # 存为可序列化的列表或集合，ScrollWeaver 支持 `_user_role_codes`
                     self.scrollweaver.server._user_role_codes = list(selected)
+                    
                     # 同步 possession 模式到 ScrollWeaver（按 role）
+                    # 统一按角色管理：每个角色只有一个possession状态（取第一个控制该角色的客户端状态）
+                    # 注意：逻辑反转
+                    # - room.possession_mode[cid] = True 表示"用户控制"（前端enabled=true）
+                    # - ScrollWeaver.possession_modes[role] = True 表示"AI接管"（AI自由行动）
+                    # 所以需要反转：用户控制 → AI不接管(False)，AI自由 → AI接管(True)
                     pos_map = {}
+                    role_to_client = {}  # 用于追踪角色到客户端的映射
+                    
                     for cid, role in self.user_selected_roles.items():
                         if role:
-                            pos_map[role] = bool(self.possession_mode.get(cid, False))
+                            # 如果角色还没有possession状态，则设置
+                            if role not in pos_map:
+                                # 反转逻辑：前端possession_mode=True(用户控制) → ScrollWeaver False(AI不接管)
+                                user_control = bool(self.possession_mode.get(cid, False))
+                                pos_map[role] = not user_control  # AI接管 = 不是用户控制
+                                role_to_client[role] = cid
+                            # 如果当前客户端有possession模式，覆盖之前的状态（确保一致性）
+                            else:
+                                # 如果当前客户端是用户控制模式，则AI不接管
+                                user_control = bool(self.possession_mode.get(cid, False))
+                                pos_map[role] = not user_control
+                                role_to_client[role] = cid
+                    
+                    # 验证：确保possession状态一致性
+                    # 如果同一个角色被多个客户端控制，使用第一个有possession的客户端状态
+                    for role in selected:
+                        if role not in pos_map:
+                            # 如果没有找到possession状态，默认为False（用户控制，AI不接管）
+                            pos_map[role] = False
+                    
                     self.scrollweaver.server.possession_modes = pos_map
                     self.scrollweaver.server._possession_mode_by_role = pos_map
-                    # 兼容性全局标志
+                    # 兼容性全局标志：any(pos_map.values()) 表示是否有任何角色是AI接管模式
                     self.scrollweaver.server._possession_mode = any(pos_map.values()) if pos_map else False
-                except Exception:
-                    pass
+                    
+                    # 验证同步是否成功
+                    if hasattr(self.scrollweaver.server, '_user_role_codes'):
+                        sync_success = True
+                    else:
+                        print(f"[Room {self.room_id}] Warning: Failed to verify role codes sync")
+                except Exception as e:
+                    print(f"[Room {self.room_id}] Error syncing user roles and possession modes: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # 如果同步失败，重试
+                    if attempts < max_attempts - 1:
+                        attempts += 1
+                        await asyncio.sleep(0.1)  # 短暂等待后重试
+                        continue
                 
                 # Execute blocking generator in a separate thread
                 # Note: generate_next_message is synchronous and cpu/io bound (LLM calls)
-                message = await loop.run_in_executor(None, self.scrollweaver.generate_next_message)
+                # 只有在同步成功后才执行消息生成
+                if sync_success:
+                    try:
+                        message = await loop.run_in_executor(None, self.scrollweaver.generate_next_message)
+                    except RuntimeError as e:
+                        # Python 3.7+ wraps StopIteration in RuntimeError when raised from generator in executor
+                        if "StopIteration" in str(e) or isinstance(e.__cause__, StopIteration):
+                            print(f"[Room {self.room_id}] Message generator exhausted (StopIteration wrapped in RuntimeError)")
+                            return None, None
+                        raise
+                    except StopIteration:
+                        # Generator exhausted - normal end condition
+                        print(f"[Room {self.room_id}] Message generator exhausted")
+                        return None, None
+                else:
+                    # 如果同步失败且已达到最大重试次数，返回None
+                    return None, None
                 
             except StopIteration:
+                # Generator exhausted - normal end condition
+                print(f"[Room {self.room_id}] Message generator exhausted")
                 return None, None
+            except RuntimeError as e:
+                # Handle StopIteration wrapped in RuntimeError (Python 3.7+)
+                if "StopIteration" in str(e) or isinstance(getattr(e, '__cause__', None), StopIteration):
+                    print(f"[Room {self.room_id}] Message generator exhausted (StopIteration wrapped in RuntimeError)")
+                    return None, None
+                raise
             except AttributeError as e:
                 # Catching thread execution errors might wrap them, but here we assume direct usage
                 if "generator" in str(e):
+                    # Generator not initialized - recoverable error
+                    print(f"[Room {self.room_id}] Generator not initialized, retrying...")
+                    if attempts < max_attempts - 1:
+                        attempts += 1
+                        await asyncio.sleep(0.5)
+                        continue
                     return None, None
-                raise
-            except Exception as e:
-                print(f"Error in async generation: {e}")
+                # Other AttributeError - potentially fatal
+                print(f"[Room {self.room_id}] Fatal AttributeError in message generation: {e}")
                 import traceback
                 traceback.print_exc()
-                # Stop iteration on error or retry? 
-                # If it's a StopIteration from inside the thread, it might come as runtime error?
-                # ThreadPoolExecutor doesn't propagate StopIteration easily if it's raised as exception.
-                # Actually concurrent.futures wraps exceptions.
-                # If generate_next_message raises StopIteration, run_in_executor will raise it here.
-                # Let's check if it IS StopIteration
-                if isinstance(e, StopIteration):
-                     return None, None
-                attempts += 1
-                continue
+                raise
+            except TimeoutError as e:
+                # API timeout - recoverable error, retry with backoff
+                print(f"[Room {self.room_id}] API timeout in message generation (attempt {attempts + 1}/{max_attempts}): {e}")
+                if attempts < max_attempts - 1:
+                    attempts += 1
+                    # Longer wait for timeout errors
+                    wait_time = min(2.0 * attempts, 10.0)  # Exponential backoff, max 10s
+                    print(f"[Room {self.room_id}] Retrying after {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[Room {self.room_id}] Max retries reached for timeout error")
+                    # Broadcast error to clients
+                    try:
+                        await self.broadcast_json({
+                            'type': 'error',
+                            'data': {'message': 'API调用超时，请稍后重试'}
+                        })
+                    except:
+                        pass
+                    return None, None
+            except Exception as e:
+                # Categorize errors
+                error_str = str(e).lower()
+                error_type = type(e).__name__
+                
+                # Check for timeout-related errors
+                is_timeout = (
+                    isinstance(e, TimeoutError) or 
+                    'timeout' in error_str or 
+                    'timed out' in error_str
+                )
+                
+                # Check for recoverable errors
+                is_recoverable = (
+                    is_timeout or
+                    any(keyword in error_str for keyword in [
+                        'network', 'connection', 'temporary', 'retry', 'rate limit',
+                        'service unavailable', '503', '502', '504'
+                    ])
+                )
+                
+                if is_recoverable:
+                    # Recoverable error - retry with backoff
+                    print(f"[Room {self.room_id}] Recoverable error in message generation (attempt {attempts + 1}/{max_attempts}): {error_type}: {e}")
+                    if attempts < max_attempts - 1:
+                        attempts += 1
+                        # Longer wait for timeout errors
+                        wait_time = min(2.0 * attempts, 10.0) if is_timeout else min(1.0 * attempts, 5.0)
+                        print(f"[Room {self.room_id}] Retrying after {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"[Room {self.room_id}] Max retries reached for recoverable error")
+                        # Broadcast error to clients
+                        try:
+                            await self.broadcast_json({
+                                'type': 'error',
+                                'data': {'message': f'服务暂时不可用: {str(e)[:100]}'}
+                            })
+                        except:
+                            pass
+                        return None, None
+                else:
+                    # Potentially fatal error - log and decide
+                    print(f"[Room {self.room_id}] Error in async generation: {error_type}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Check if it's a StopIteration wrapped in RuntimeError
+                    if isinstance(e, StopIteration) or (isinstance(e, RuntimeError) and "StopIteration" in str(e)):
+                        return None, None
+                    
+                    # For other errors, retry if attempts remain
+                    if attempts < max_attempts - 1:
+                        attempts += 1
+                        await asyncio.sleep(0.5)
+                        continue
+                    else:
+                        # Fatal error after max attempts
+                        print(f"[Room {self.room_id}] Fatal error after {max_attempts} attempts: {e}")
+                        # Broadcast error to clients
+                        try:
+                            await self.broadcast_json({
+                                'type': 'error',
+                                'data': {'message': f'消息生成失败: {str(e)[:100]}'}
+                            })
+                        except:
+                            pass
+                        return None, None
             
             if message is None:
+                print(f"[Room {self.room_id}] get_next_message: message is None (attempt {attempts + 1}/{max_attempts})")
                 attempts += 1
                 continue
             
@@ -212,9 +419,11 @@ class Room:
             if text == "__USER_INPUT_PLACEHOLDER__":
                 message["is_placeholder"] = True
                 status = self.scrollweaver.get_current_status()
+                print(f"[Room {self.room_id}] get_next_message: got placeholder for user input")
                 return message, status
             
             if not text:
+                print(f"[Room {self.room_id}] get_next_message: message text is empty (attempt {attempts + 1}/{max_attempts})")
                 attempts += 1
                 continue
 
@@ -222,6 +431,7 @@ class Room:
                 message["icon"] = default_icon_path
             
             status = self.scrollweaver.get_current_status()
+            print(f"[Room {self.room_id}] get_next_message: returning message with text length {len(text)}")
             return message, status
         
         return None, None
@@ -233,12 +443,19 @@ class Room:
         try:
             role_name_lower = role_name.lower().strip()
             for role_code in self.scrollweaver.server.role_codes:
-                performer = self.scrollweaver.server.performers[role_code]
-                if (performer.role_name and performer.role_name.lower().strip() == role_name_lower) or \
-                   (performer.nickname and performer.nickname.lower().strip() == role_name_lower):
+                performer = self.scrollweaver.server.performers.get(role_code)
+                if not performer:
+                    continue
+                # Safely check attributes
+                performer_role_name = getattr(performer, 'role_name', None)
+                performer_nickname = getattr(performer, 'nickname', None)
+                if (performer_role_name and performer_role_name.lower().strip() == role_name_lower) or \
+                   (performer_nickname and performer_nickname.lower().strip() == role_name_lower):
                     return role_code
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Room {self.room_id}] Error in _get_role_code_by_name: {e}")
+            import traceback
+            traceback.print_exc()
         return None
 
     async def handle_user_role_input(self, client_id: str, role_code: str, user_text: str, delay_display: bool = False, skip_broadcast: bool = False):
@@ -257,6 +474,7 @@ class Room:
             
             performer = self.scrollweaver.server.performers[role_code]
             username = performer.nickname if hasattr(performer, 'nickname') and performer.nickname else (performer.role_name if hasattr(performer, 'role_name') else role_code)
+            # 统一消息格式：确保所有字段都存在
             message = {
                 'username': username,
                 'type': 'role',
@@ -265,7 +483,8 @@ class Room:
                 'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
                 'uuid': record_id,
                 'scene': self.scrollweaver.server.cur_round,
-                'is_user': True
+                'is_user': True,
+                'is_timeout_replacement': False  # 明确标记不是超时回复
             }
             
             if delay_display:
@@ -283,6 +502,120 @@ class Room:
         except Exception as e:
             print(f"Error handling user role input: {e}")
 
+    async def generate_auto_action(self, client_id: str, role_code: str) -> str:
+        """使用AI自动生成角色的行动（单个选项，保持向后兼容）"""
+        options = await self.generate_auto_action_options(client_id, role_code, num_options=1)
+        return options[0]['text'] if options and len(options) > 0 else None
+
+    async def generate_auto_action_options(self, client_id: str, role_code: str, num_options: int = 3) -> list:
+        """使用AI自动生成角色的多个行动选项"""
+        try:
+            performer = self.scrollweaver.server.performers[role_code]
+            current_status = self.scrollweaver.server.current_status
+            group = current_status.get('group', [])
+            
+            # 将group中的名称/代码转换为角色代码列表
+            group_codes = []
+            for item in group:
+                # 如果已经是角色代码，直接使用
+                if item in self.scrollweaver.server.role_codes:
+                    group_codes.append(item)
+                else:
+                    # 否则尝试通过名称查找角色代码
+                    code = self._get_role_code_by_name(item)
+                    if code:
+                        group_codes.append(code)
+            
+            # 确保当前角色在group中
+            if role_code not in group_codes:
+                group_codes.append(role_code)
+            
+            # 获取同组其他角色信息
+            other_roles_info = self.scrollweaver.server._get_group_members_info_dict(group_codes)
+            
+            # 定义不同风格的选项配置
+            style_configs = [
+                {
+                    'style': 'aggressive',
+                    'name': '激进',
+                    'description': '采取更直接、大胆的行动',
+                    'temperature': 1.2,
+                    'style_hint': '采取更直接、大胆、果断的行动方式。不要过于谨慎，可以承担一定风险。'
+                },
+                {
+                    'style': 'balanced',
+                    'name': '平衡',
+                    'description': '采取平衡、理性的行动',
+                    'temperature': 0.8,
+                    'style_hint': '采取平衡、理性的行动方式。综合考虑各种因素，做出合理的决策。'
+                },
+                {
+                    'style': 'conservative',
+                    'name': '保守',
+                    'description': '采取谨慎、稳妥的行动',
+                    'temperature': 0.5,
+                    'style_hint': '采取谨慎、稳妥、保守的行动方式。优先考虑安全，避免不必要的风险。'
+                }
+            ]
+            
+            # 生成多个选项
+            options = []
+            loop = asyncio.get_running_loop()
+            
+            for i, config in enumerate(style_configs[:num_options]):
+                max_retries = 3  # 每个选项最多重试3次
+                retry_count = 0
+                success = False
+                
+                while retry_count < max_retries and not success:
+                    try:
+                        # 调用Performer的plan_with_style方法生成行动，传入风格提示和温度
+                        # 使用 run_in_executor 在单独的线程中执行阻塞的 LLM 调用
+                        # 使用 partial 避免闭包问题
+                        plan_func = partial(
+                            performer.plan_with_style,
+                            other_roles_info=other_roles_info,
+                            available_locations=self.scrollweaver.server.orchestrator.locations,
+                            world_description=self.scrollweaver.server.orchestrator.description,
+                            intervention=self.scrollweaver.server.event,
+                            style_hint=config['style_hint'],
+                            temperature=config['temperature']
+                        )
+                        plan = await loop.run_in_executor(None, plan_func)
+                        
+                        detail = plan.get("detail", "")
+                        # 检查detail是否为空或只包含空白字符
+                        if detail and detail.strip():
+                            options.append({
+                                'index': i + 1,
+                                'style': config['style'],
+                                'name': config['name'],
+                                'description': config['description'],
+                                'text': detail
+                            })
+                            success = True
+                        else:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                print(f"Warning: Option {i+1} ({config['style']}) returned empty detail, retrying ({retry_count}/{max_retries-1})...")
+                            else:
+                                print(f"Error: Option {i+1} ({config['style']}) failed after {max_retries} attempts: detail is empty")
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            print(f"Error generating option {i+1} ({config['style']}), retrying ({retry_count}/{max_retries-1}): {e}")
+                        else:
+                            print(f"Error generating option {i+1} ({config['style']}) after {max_retries} attempts: {e}")
+                            import traceback
+                            traceback.print_exc()
+            
+            return options if options else None
+        except Exception as e:
+            print(f"Error in generate_auto_action_options: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     async def start_story_loop(self):
         """Single loop to drive the story forward for the room"""
         if self.story_task and not self.story_task.done():
@@ -291,9 +624,10 @@ class Room:
         self.story_task = asyncio.create_task(self._story_loop())
     
     async def _story_loop(self):
-        print(f"Starting story loop for Room {self.room_id}")
+        print(f"[Room {self.room_id}] Starting story loop")
         try:
             if len(self.scrollweaver.server.role_codes) == 0:
+                 print(f"[Room {self.room_id}] No roles found, waiting for characters...")
                  await self.broadcast_json({
                     'type': 'error',
                     'data': {'message': 'Waiting for characters...'}
@@ -301,16 +635,26 @@ class Room:
                  # Wait a bit or exit loop? Let's check periodically or wait for an event?
                  # For now, just exit and let 'start_story_loop' be called again when agents are added
                  return
+            
+            print(f"[Room {self.room_id}] Story loop started with {len(self.scrollweaver.server.role_codes)} roles: {list(self.scrollweaver.server.role_codes)}")
 
             while True:
                 # Check active connections
                 if not self.active_connections:
-                    await asyncio.sleep(1)
-                    continue # Pause if nobody listening? Or keep running? 
-                    # Probably keep running but maybe slower or pause to save resources
-                    # For a multiplayer game, usually the world keeps running or pauses if empty.
-                    # Let's pause to save tokens.
-                    # continue
+                    # Room is empty - pause story loop to save resources
+                    print(f"[Room {self.room_id}] No active connections, pausing story loop")
+                    self.last_empty_time = datetime.now()
+                    
+                    # Wait for connections with periodic checks
+                    empty_check_interval = 5  # Check every 5 seconds
+                    while not self.active_connections:
+                        await asyncio.sleep(empty_check_interval)
+                        # Check if room should be cleaned up (handled by RoomManager cleanup loop)
+                    
+                    # Connections restored - resume story loop
+                    print(f"[Room {self.room_id}] Active connections restored, resuming story loop")
+                    self.last_empty_time = None
+                    continue
 
                 # Determine active user role across all clients?
                 # The logic in ConnectionManager assumed one user driving one role.
@@ -395,6 +739,9 @@ class Room:
                         await self.broadcast_json({'type': 'story_ended', 'data': {'message': 'Story ended.'}})
                      break
                 
+                # Debug: Log message received
+                print(f"[Room {self.room_id}] Got message: type={message.get('type')}, username={message.get('username')}, text_preview={str(message.get('text', ''))[:50]}")
+                
                 is_placeholder = message.get('is_placeholder', False) or message.get('text', '').strip().startswith('__USER_INPUT_PLACEHOLDER__')
                 
                 # Identify which role this message belongs to
@@ -411,6 +758,54 @@ class Room:
                 
                 if controlling_client_id and is_placeholder:
                     # It's a user turn!
+                    # Check if client is still connected before waiting for input
+                    if controlling_client_id not in self.active_connections:
+                        print(f"[Room {self.room_id}] Client {controlling_client_id} disconnected, skipping user input wait")
+                        # Use AI auto-reply instead
+                        try:
+                            performer = self.scrollweaver.server.performers.get(current_role_code)
+                            if performer:
+                                loop = asyncio.get_running_loop()
+                                try:
+                                    ai_interaction = await loop.run_in_executor(
+                                        None,
+                                        lambda: performer.single_role_interact(current_role_code, username, "（用户已断开，AI自动回复）", "")
+                                    )
+                                    ai_text = None
+                                    if isinstance(ai_interaction, dict):
+                                        ai_text = ai_interaction.get('detail') or ai_interaction.get('text') or None
+                                    elif isinstance(ai_interaction, str):
+                                        ai_text = ai_interaction
+                                    
+                                    if ai_text:
+                                        record_id = str(uuid.uuid4())
+                                        self.scrollweaver.server.record(
+                                            role_code=current_role_code,
+                                            detail=ai_text,
+                                            actor=current_role_code,
+                                            group=self.scrollweaver.server.current_status.get('group', [current_role_code]),
+                                            actor_type='role',
+                                            act_type="user_input",
+                                            record_id=record_id
+                                        )
+                                        timeout_msg = {
+                                            'username': username,
+                                            'type': 'role',
+                                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            'text': ai_text,
+                                            'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
+                                            'uuid': record_id,
+                                            'scene': self.scrollweaver.server.cur_round,
+                                            'is_user': False,
+                                            'is_timeout_replacement': True
+                                        }
+                                        await self.broadcast_json({'type': 'message', 'data': timeout_msg})
+                                except Exception as e:
+                                    print(f"[Room {self.room_id}] Error generating AI reply for disconnected client: {e}")
+                        except Exception as e:
+                            print(f"[Room {self.room_id}] Error handling disconnected client input: {e}")
+                        continue
+                    
                     # Notify SPECIFIC user to input
                     ws = self.active_connections.get(controlling_client_id)
                     if ws:
@@ -451,7 +846,24 @@ class Room:
                              except Exception:
                                  pass
 
+                             # Start timeout reminder task
+                             reminder_task = None
+                             try:
+                                 reminder_task = asyncio.create_task(
+                                     self._send_timeout_reminders(controlling_client_id, timeout, future)
+                                 )
+                             except Exception as e:
+                                 print(f"Error starting timeout reminder task: {e}")
+
                              user_input_result = await asyncio.wait_for(future, timeout=timeout)
+                             
+                             # Cancel reminder task if user responded
+                             if reminder_task and not reminder_task.done():
+                                 reminder_task.cancel()
+                                 try:
+                                     await reminder_task
+                                 except asyncio.CancelledError:
+                                     pass
                              if isinstance(user_input_result, tuple):
                                  user_text, is_echoed = user_input_result
                              else:
@@ -486,15 +898,19 @@ class Room:
                                          record["act_type"] = "user_input"
                                          break
 
+                                 # 无论是否已回显，都确保消息被广播（统一消息格式）
                                  if not is_echoed:
-                                      # Broadcast echo to ALL
+                                      # Broadcast echo to ALL with complete message format
                                       echo_msg = {
-                                        'type': 'role',
                                         'username': username,
-                                        'text': user_text,
-                                        'is_user': True,
+                                        'type': 'role',
                                         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                        'uuid': original_uuid
+                                        'text': user_text,
+                                        'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
+                                        'uuid': original_uuid,
+                                        'scene': self.scrollweaver.server.cur_round,
+                                        'is_user': True,
+                                        'is_timeout_replacement': False
                                       }
                                       await self.broadcast_json({'type': 'message', 'data': echo_msg})
                              else:
@@ -503,31 +919,42 @@ class Room:
 
                          except asyncio.TimeoutError:
                              # User did not respond in time. Notify room and skip.
+                             # Cancel reminder task if still running
+                             if reminder_task and not reminder_task.done():
+                                 reminder_task.cancel()
+                                 try:
+                                     await reminder_task
+                                 except asyncio.CancelledError:
+                                     pass
+                             
                              try:
                                  await self.broadcast_json({
                                      'type': 'input_countdown_timeout',
                                      'data': {
                                          'role_name': username,
                                          'role_code': current_role_code,
-                                         'message': f'用户 {username} 超时未回复，已跳过'
+                                         'message': f'用户 {username} 超时未回复，已自动使用AI回复'
                                      }
                                  })
-                             except Exception:
-                                 pass
+                             except Exception as e:
+                                 print(f"Error broadcasting timeout notification: {e}")
                              try:
                                  await self.broadcast_json({
                                      'type': 'system',
-                                     'data': {'message': f'用户 {username} 超时未回复，已跳过'}
+                                     'data': {'message': f'用户 {username} 超时未回复，已自动使用AI回复'}
                                  })
-                             except Exception:
-                                 pass
-                             print(f"User input timeout for client {controlling_client_id} (role {current_role_code})")
+                             except Exception as e:
+                                 print(f"Error broadcasting system timeout message: {e}")
+                             
+                             print(f"[Room {self.room_id}] User input timeout for client {controlling_client_id} (role {current_role_code})")
+                             
                              # Attempt AI auto-reply to replace the missing user input
                              try:
                                  performer = None
                                  try:
                                      performer = self.scrollweaver.server.performers.get(current_role_code)
-                                 except Exception:
+                                 except Exception as e:
+                                     print(f"[Room {self.room_id}] Error getting performer for {current_role_code}: {e}")
                                      performer = None
 
                                  if performer:
@@ -556,13 +983,48 @@ class Room:
                                          ai_text = ai_interaction
 
                                      if ai_text:
-                                         # Record and broadcast as if it were a user input
+                                         # Record and broadcast with timeout replacement marker
                                          try:
-                                             await self.handle_user_role_input(controlling_client_id, current_role_code, ai_text)
+                                             record_id = str(uuid.uuid4())
+                                             self.scrollweaver.server.record(
+                                                 role_code=current_role_code,
+                                                 detail=ai_text,
+                                                 actor=current_role_code,
+                                                 group=self.scrollweaver.server.current_status.get('group', [current_role_code]),
+                                                 actor_type='role',
+                                                 act_type="user_input",
+                                                 record_id=record_id
+                                             )
+                                             
+                                             # Broadcast timeout replacement message with marker
+                                             timeout_msg = {
+                                                 'username': username,
+                                                 'type': 'role',
+                                                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                 'text': ai_text,
+                                                 'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
+                                                 'uuid': record_id,
+                                                 'scene': self.scrollweaver.server.cur_round,
+                                                 'is_user': False,
+                                                 'is_timeout_replacement': True
+                                             }
+                                             await self.broadcast_json({'type': 'message', 'data': timeout_msg})
+                                             
+                                             status = self.scrollweaver.get_current_status()
+                                             await self.broadcast_json({
+                                                 'type': 'status_update',
+                                                 'data': status
+                                             })
                                          except Exception as e:
-                                             print(f"Error broadcasting AI replacement input: {e}")
+                                             print(f"[Room {self.room_id}] Error broadcasting AI replacement input: {e}")
+                                             import traceback
+                                             traceback.print_exc()
+                                 else:
+                                     print(f"[Room {self.room_id}] No performer found for {current_role_code}, cannot generate AI replacement")
                              except Exception as e:
-                                 print(f"Error generating AI replacement on timeout: {e}")
+                                 print(f"[Room {self.room_id}] Error generating AI replacement on timeout: {e}")
+                                 import traceback
+                                 traceback.print_exc()
                          except Exception as e:
                              print(f"Error handling user input: {e}")
                          finally:
@@ -575,15 +1037,68 @@ class Room:
                 else:
                     # Normal message, broadcast to all
                     if not is_placeholder:
+                        # 确保消息格式统一：添加缺失的字段
+                        if 'is_user' not in message:
+                            message['is_user'] = False
+                        if 'is_timeout_replacement' not in message:
+                            message['is_timeout_replacement'] = False
+                        if 'timestamp' not in message:
+                            message['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        if 'type' not in message:
+                            message['type'] = 'role'
+                        
+                        # Debug: Log before broadcasting
+                        print(f"[Room {self.room_id}] Broadcasting message: username={message.get('username')}, text_preview={str(message.get('text', ''))[:50]}, active_connections={len(self.active_connections)}")
+                        
                         await self.broadcast_json({'type': 'message', 'data': message})
                         if status:
                              await self.broadcast_json({'type': 'status_update', 'data': status})
                         await asyncio.sleep(0.2)
 
+        except asyncio.CancelledError:
+            # Task was cancelled - normal shutdown
+            print(f"[Room {self.room_id}] Story loop cancelled")
+            raise
         except Exception as e:
-            print(f"Room story loop error: {e}")
-            import traceback
-            traceback.print_exc()
+            # Categorize errors
+            error_str = str(e).lower()
+            is_fatal = any(keyword in error_str for keyword in [
+                'keyerror', 'attributeerror', 'typeerror', 'valueerror', 'indexerror'
+            ])
+            
+            if is_fatal:
+                # Fatal error - stop loop and notify clients
+                print(f"[Room {self.room_id}] Fatal error in story loop: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                try:
+                    await self.broadcast_json({
+                        'type': 'error',
+                        'data': {
+                            'message': f'故事循环发生致命错误: {str(e)}',
+                            'fatal': True
+                        }
+                    })
+                except Exception as broadcast_error:
+                    print(f"[Room {self.room_id}] Error broadcasting fatal error: {broadcast_error}")
+                
+                # Stop the loop
+                return
+            else:
+                # Recoverable error - log and continue
+                print(f"[Room {self.room_id}] Recoverable error in story loop: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                # Try to continue after a short delay
+                try:
+                    await asyncio.sleep(1.0)
+                    # Restart the loop
+                    await self.start_story_loop()
+                except Exception as restart_error:
+                    print(f"[Room {self.room_id}] Error restarting story loop: {restart_error}")
+                    return
 
     async def broadcast_json_except(self, excluded_cid: str, data: dict):
         for cid, ws in self.active_connections.items():
@@ -592,6 +1107,66 @@ class Room:
                     await ws.send_json(data)
                 except:
                     pass
+
+    async def _send_timeout_reminders(self, client_id: str, timeout: int, future: asyncio.Future):
+        """发送超时提醒消息"""
+        reminder_intervals = config.get('user_input_timeout_reminder_intervals', [30, 15, 10])
+        warning_seconds = config.get('user_input_timeout_warning_seconds', 10)
+        
+        for reminder_seconds in sorted(reminder_intervals, reverse=True):
+            if reminder_seconds >= timeout:
+                continue
+            
+            try:
+                await asyncio.sleep(timeout - reminder_seconds)
+                
+                # 检查future是否已完成
+                if future.done():
+                    return
+                
+                # 检查客户端是否仍然连接
+                if client_id not in self.active_connections:
+                    return
+                
+                ws = self.active_connections.get(client_id)
+                if ws:
+                    await ws.send_json({
+                        'type': 'input_timeout_warning',
+                        'data': {
+                            'remaining_seconds': reminder_seconds,
+                            'message': f'还剩 {reminder_seconds} 秒，超时后将自动使用AI回复'
+                        }
+                    })
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                print(f"Error sending timeout reminder: {e}")
+        
+        # 最后发送一次警告（当剩余时间≤warning_seconds时）
+        if warning_seconds < timeout:
+            try:
+                await asyncio.sleep(timeout - warning_seconds)
+                
+                if future.done():
+                    return
+                
+                if client_id not in self.active_connections:
+                    return
+                
+                ws = self.active_connections.get(client_id)
+                if ws:
+                    await ws.send_json({
+                        'type': 'input_timeout_warning',
+                        'data': {
+                            'remaining_seconds': warning_seconds,
+                            'message': f'⚠️ 还剩 {warning_seconds} 秒！超时后将自动使用AI回复',
+                            'urgent': True
+                        }
+                    })
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                print(f"Error sending final timeout warning: {e}")
 
 class RoomManager:
     def __init__(self):

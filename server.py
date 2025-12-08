@@ -237,22 +237,36 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                     # Broadcast full selection map to room (clients can refresh UI)
                     await room.broadcast_json({'type': 'role_selection_map', 'data': room.user_selected_roles})
                 
-            elif msg_type == 'possession_mode':
+            elif msg_type == 'possession_mode' or msg_type == 'set_possession_mode':
                 enabled = data.get('enabled', False)
-                room.possession_mode[client_id] = enabled
                 role_code = room.user_selected_roles.get(client_id)
+                
+                # 注意：前端的语义是：
+                # - enabled = true 表示"用户控制模式"（possession mode开启）
+                # - enabled = false 表示"AI自由行动模式"（possession mode关闭）
+                # 但ScrollWeaver中的语义是：
+                # - possession_modes[role] = True 表示"AI接管"（AI自由行动）
+                # - possession_modes[role] = False 表示"用户控制"（等待用户输入）
+                # 所以需要反转逻辑
+                
+                room.possession_mode[client_id] = enabled
+                
                 # Sync possession per-role to ScrollWeaver server
                 try:
                     # Build role->possession mapping
                     pos_map = getattr(room.scrollweaver.server, '_possession_mode_by_role', {}) or {}
                     if role_code:
-                        pos_map[role_code] = bool(enabled)
+                        # 反转逻辑：前端enabled=true(用户控制) → ScrollWeaver需要False(AI不接管)
+                        # 前端enabled=false(AI自由) → ScrollWeaver需要True(AI接管)
+                        pos_map[role_code] = not bool(enabled)
                     # default global flag for backward compatibility
-                    room.scrollweaver.server._possession_mode = any(pos_map.values()) if pos_map else bool(enabled)
+                    room.scrollweaver.server._possession_mode = any(not v for v in pos_map.values()) if pos_map else not bool(enabled)
                     room.scrollweaver.server._possession_mode_by_role = pos_map
-                except Exception:
+                    print(f"[Room {room.room_id}] Possession mode updated: client={client_id}, role={role_code}, enabled={enabled}, ai_possession={pos_map.get(role_code) if role_code else 'N/A'}")
+                except Exception as e:
+                    print(f"[Room {room.room_id}] Error syncing possession mode: {e}")
                     # best-effort only
-                    room.scrollweaver.server._possession_mode = enabled
+                    room.scrollweaver.server._possession_mode = not bool(enabled)
                 
             elif msg_type == 'clear_role':
                 if client_id in room.user_selected_roles:
@@ -275,15 +289,112 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                      'type': 'characters_updated',
                      'data': {'characters': room.scrollweaver.get_characters_info()}
                  })
+            
+            elif msg_type == 'auto_complete':
+                # 处理AI自动完成请求
+                if client_id in room.waiting_for_input and room.waiting_for_input[client_id]:
+                    user_role_code = room.user_selected_roles.get(client_id)
+                    if user_role_code and client_id in room.pending_user_inputs:
+                        if not room.pending_user_inputs[client_id].done():
+                            try:
+                                # 调用AI生成多个行动选项
+                                options = await room.generate_auto_action_options(client_id, user_role_code, num_options=3)
+                                if options and len(options) > 0:
+                                    # 发送多个选项给前端
+                                    await websocket.send_json({
+                                        'type': 'auto_complete_options',
+                                        'data': {
+                                            'options': options,
+                                            'message': 'AI已生成多个行动选项，请选择'
+                                        }
+                                    })
+                                else:
+                                    await websocket.send_json({
+                                        'type': 'error',
+                                        'data': {'message': 'AI生成行动失败，请重试'}
+                                    })
+                            except Exception as e:
+                                print(f"Error generating auto action options: {e}")
+                                import traceback
+                                traceback.print_exc()
+                                await websocket.send_json({
+                                    'type': 'error',
+                                    'data': {'message': f'生成行动时出错: {str(e)}'}
+                                })
+                        else:
+                            await websocket.send_json({
+                                'type': 'error',
+                                'data': {'message': '输入已完成，无法生成建议'}
+                            })
+                    else:
+                        await websocket.send_json({
+                            'type': 'error',
+                            'data': {'message': '未选择角色或不在等待输入状态'}
+                        })
+                else:
+                    await websocket.send_json({
+                        'type': 'error',
+                        'data': {'message': '当前不在等待输入状态'}
+                    })
+            
+            elif msg_type == 'select_auto_option':
+                # 处理用户选择的AI选项
+                if client_id in room.waiting_for_input and room.waiting_for_input[client_id]:
+                    user_role_code = room.user_selected_roles.get(client_id)
+                    if user_role_code and client_id in room.pending_user_inputs:
+                        if not room.pending_user_inputs[client_id].done():
+                            selected_text = data.get('selected_text', '')
+                            if selected_text:
+                                # 将选中的选项作为用户输入，并标记为已回显
+                                room.pending_user_inputs[client_id].set_result((selected_text, True))
+                                
+                                # 立即回显消息给前端，确保用户能马上看到自己的回复
+                                performer = room.scrollweaver.server.performers.get(user_role_code)
+                                username = performer.nickname if performer and hasattr(performer, 'nickname') and performer.nickname else (performer.role_name if performer and hasattr(performer, 'role_name') else user_role_code)
+                                
+                                await websocket.send_json({
+                                    'type': 'message',
+                                    'data': {
+                                        'username': username,
+                                        'text': selected_text,
+                                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                        'is_user': True
+                                    }
+                                })
+                                
+                                await websocket.send_json({
+                                    'type': 'auto_complete_success',
+                                    'data': {'message': '已选择AI生成的行动'}
+                                })
+                            else:
+                                await websocket.send_json({
+                                    'type': 'error',
+                                    'data': {'message': '无效的选项'}
+                                })
+                        else:
+                            await websocket.send_json({
+                                'type': 'error',
+                                'data': {'message': '输入已完成，无法选择建议'}
+                            })
+                    else:
+                        await websocket.send_json({
+                            'type': 'error',
+                            'data': {'message': '未选择角色或不在等待输入状态'}
+                        })
+                else:
+                    await websocket.send_json({
+                        'type': 'error',
+                        'data': {'message': '当前不在等待输入状态'}
+                    })
                  
     except WebSocketDisconnect:
-        room.disconnect(client_id)
+        await room.disconnect(client_id)
         print(f"Client {client_id} disconnected from room {room_id}")
     except Exception as e:
         print(f"WebSocket error: {e}")
         import traceback
         traceback.print_exc()
-        room.disconnect(client_id)
+        await room.disconnect(client_id)
 
 
 
@@ -304,12 +415,31 @@ async def reset_sandbox(request: Request):
         if not room_id or not room:
              room = room_manager.get_or_create_default_room()
              
+        print(f"[Reset Sandbox] Resetting sandbox for room {room.room_id}")
+        
         # Stop current story loop
         if room.story_task and not room.story_task.done():
             room.story_task.cancel()
-            
-        # Clear history
-        room.scrollweaver.server.history_manager.clear_history()
+            try:
+                await room.story_task
+            except asyncio.CancelledError:
+                pass
+            print(f"[Reset Sandbox] Story loop cancelled for room {room.room_id}")
+        
+        # Clear history - use the correct method
+        if hasattr(room.scrollweaver.server, 'history_manager'):
+            room.scrollweaver.server.history_manager.detailed_history = []
+            if hasattr(room.scrollweaver.server.history_manager, 'history'):
+                room.scrollweaver.server.history_manager.history = []
+            print(f"[Reset Sandbox] History cleared for room {room.room_id}")
+        
+        # Reset round and event
+        if hasattr(room.scrollweaver.server, 'cur_round'):
+            room.scrollweaver.server.cur_round = 0
+        if hasattr(room.scrollweaver.server, 'event_history'):
+            room.scrollweaver.server.event_history = []
+        if hasattr(room.scrollweaver.server, 'event'):
+            room.scrollweaver.server.event = ""
         
         # Reset generator
         room.generator_initialized = False
@@ -317,9 +447,10 @@ async def reset_sandbox(request: Request):
         # Broadcast reset
         await room.broadcast_json({
             'type': 'system_reset',
-            'message': '沙盒已重置'
+            'data': {'message': '沙盒已重置'}
         })
         
+        print(f"[Reset Sandbox] Sandbox reset completed for room {room.room_id}")
         return {"success": True}
     except Exception as e:
         print(f"Error resetting sandbox: {e}")
@@ -339,16 +470,25 @@ async def clear_chat_history(request: Request):
         if not room_id or not room:
              room = room_manager.get_or_create_default_room()
 
-        room.scrollweaver.server.history_manager.clear_history()
+        print(f"[Clear History] Clearing chat history for room {room.room_id}")
+        
+        # Clear history - use the correct method
+        if hasattr(room.scrollweaver.server, 'history_manager'):
+            room.scrollweaver.server.history_manager.detailed_history = []
+            if hasattr(room.scrollweaver.server.history_manager, 'history'):
+                room.scrollweaver.server.history_manager.history = []
+            print(f"[Clear History] History cleared for room {room.room_id}")
         
         await room.broadcast_json({
             'type': 'history_cleared',
-            'message': '聊天记录已清空'
+            'data': {'message': '聊天记录已清空'}
         })
         
         return {"success": True}
     except Exception as e:
         print(f"Error clearing history: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/start-1on1-chat")
@@ -1104,12 +1244,15 @@ async def restore_user_agent(request: Request):
         if role_code in room.scrollweaver.server.role_codes:
             print(f"用户Agent {role_code} 已存在于沙盒中，跳过恢复")
             agent = room.scrollweaver.server.performers.get(role_code)
+            nickname = "Unknown"
+            if agent:
+                nickname = getattr(agent, 'nickname', None) or getattr(agent, 'role_name', None) or "Unknown"
             return {
                 "success": True,
                 "already_exists": True,
                 "agent_info": {
                     "role_code": role_code,
-                    "nickname": agent.nickname if agent else "Unknown",
+                    "nickname": nickname,
                     "message": "Agent已存在"
                 }
             }
