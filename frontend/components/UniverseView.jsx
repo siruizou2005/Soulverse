@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Atom, ChevronRight, Play, User, LogOut, Loader } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { Atom, ChevronRight, Play, User, LogOut, Loader, Users, ArrowRight, Hash } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import CosmicBackground from './CosmicBackground';
 import NeuralMatching from './NeuralMatching';
 import ChatInterface from './ChatInterface';
@@ -9,7 +9,7 @@ import UserAgentStatus from './UserAgentStatus';
 import { api } from '../services/api';
 
 export default function UniverseView({ user }) {
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const [showWizard, setShowWizard] = useState(false);
   const [showUserStatus, setShowUserStatus] = useState(false);
   const [selectedAgents, setSelectedAgents] = useState([]);
@@ -21,22 +21,39 @@ export default function UniverseView({ user }) {
   const [targetAgent, setTargetAgent] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [viewingAgent, setViewingAgent] = useState(null); // Track which agent profile to view
+
+  const [roomId, setRoomId] = useState(null); // Initialize as null to show selection
+  const [roomInput, setRoomInput] = useState('');
+
   const initRef = useRef(false); // 防止 StrictMode 重复执行
 
+  // Initialize Room ID
   useEffect(() => {
+    const rid = searchParams.get('room_id');
+    if (rid) {
+      setRoomId(rid);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!roomId) return; // Wait for room_id
     if (initRef.current) return; // 已经初始化过，跳过
     initRef.current = true;
 
     checkDigitalTwin();
 
     // 初始化 WebSocket 连接（用于接收角色列表更新）
+    // Use room-specific WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
     const isDev = process.env.NODE_ENV === 'development';
     const clientId = Math.random().toString(36).substring(7);
+
+    // /ws/{room_id}/{client_id}
     const websocketUrl = isDev
-      ? `${protocol}//${host}:8001/ws/${clientId}`
-      : `${protocol}//${host}/ws/${clientId}`;
+      ? `${protocol}//${host}:8001/ws/${roomId}/${clientId}`
+      : `${protocol}//${host}/ws/${roomId}/${clientId}`;
+
     const websocket = new WebSocket(websocketUrl);
 
     websocket.onopen = () => {
@@ -65,7 +82,7 @@ export default function UniverseView({ user }) {
     return () => {
       websocket.close();
     };
-  }, []);
+  }, [roomId]);
 
   const checkDigitalTwin = async () => {
     try {
@@ -74,7 +91,7 @@ export default function UniverseView({ user }) {
       // 0. 首先清空沙盒中的所有旧预设agents（无论是否有数字孪生）
       console.log('清空沙盒中的所有旧agents（包括上次会话的残留）...');
       try {
-        const clearResult = await api.clearPresetAgents();
+        const clearResult = await api.clearPresetAgents(roomId);
         if (clearResult.success) {
           console.log(`✓ 已清空 ${clearResult.removed_count} 个旧agents`);
         }
@@ -90,7 +107,7 @@ export default function UniverseView({ user }) {
         console.log('准备恢复用户agent到沙盒...');
         // 1. 恢复用户 agent 到沙盒
         try {
-          const restoreResult = await api.restoreUserAgent(result.agent_info.role_code);
+          const restoreResult = await api.restoreUserAgent(result.agent_info.role_code, roomId);
           if (restoreResult.success) {
             console.log('✓ 用户agent已恢复到沙盒:', restoreResult.agent_info.nickname);
           } else {
@@ -121,7 +138,7 @@ export default function UniverseView({ user }) {
       // 在匹配之前，先清空沙盒中的预设agents（保留用户agent）
       console.log('清空沙盒中的旧预设agents...');
       try {
-        const clearResult = await api.clearPresetAgents();
+        const clearResult = await api.clearPresetAgents(roomId);
         if (clearResult.success) {
           console.log(`✓ 已清空 ${clearResult.removed_count} 个旧预设agents`);
         }
@@ -133,7 +150,10 @@ export default function UniverseView({ user }) {
       setAgentsAdded(false);
 
       // 调用神经匹配接口
-      const result = await api.neuralMatch();
+      const result = await api.neuralMatch(); // Neural match reads profile, room agnostic for reading profile, but embedding might need room? No, API updated to use default room for embedding model access. 
+      // Wait, neural match API uses default room. But maybe we pass roomId if we want to use room-specific settings?
+      // Currently neural_match doesn't take room_id because it just matches vs preset templates (global).
+      // So no change needed here.
 
       if (result.success) {
         // 后端返回的是 matched_twins 和 random_twins，不是 matches
@@ -180,7 +200,7 @@ export default function UniverseView({ user }) {
     for (const agent of agents) {
       try {
         if (agent.preset_id) {
-          const result = await api.addPresetNPC(agent.preset_id, agent.name);
+          const result = await api.addPresetNPC(agent.preset_id, agent.name, roomId);
           if (result.success && result.agent_info) {
             // 保存完整的agent_info，同时保留匹配度信息
             updatedAgents.push({
@@ -244,7 +264,7 @@ export default function UniverseView({ user }) {
     try {
       // 重置沙盒状态
       console.log('Resetting sandbox...');
-      const resetResult = await api.resetSandbox();
+      const resetResult = await api.resetSandbox(roomId);
 
       if (resetResult.success) {
         console.log('Sandbox reset successful');
@@ -288,7 +308,7 @@ export default function UniverseView({ user }) {
     ));
 
     try {
-      await api.toggleAgentSandbox(agent.role_code, !newDisabledState, agent.preset_id);
+      await api.toggleAgentSandbox(agent.role_code, !newDisabledState, agent.preset_id, roomId);
     } catch (error) {
       console.error('Toggle failed', error);
       // 失败回滚
@@ -310,8 +330,8 @@ export default function UniverseView({ user }) {
         return;
       }
 
-      console.log(`[1on1] Calling API with role_code: ${agent.role_code}, preset_id: ${agent.preset_id}`);
-      await api.start1on1Chat(agent.role_code, agent.preset_id);
+      console.log(`[1on1] Calling API with role_code: ${agent.role_code}, preset_id: ${agent.preset_id}, roomId: ${roomId}`);
+      await api.start1on1Chat(agent.role_code, agent.preset_id, roomId);
 
       setTargetAgent(agent);
       setIs1on1(true);
@@ -336,6 +356,80 @@ export default function UniverseView({ user }) {
     // Use fullAgentInfo if available, otherwise use basic agent data
     setViewingAgent(loadedAgent?.fullAgentInfo || agent);
   };
+
+  /* Room Selection UI */
+  if (!roomId) {
+    return (
+      <div className="relative w-full h-screen bg-black text-white overflow-hidden flex items-center justify-center">
+        <CosmicBackground intensity={0.6} />
+        <div className="z-10 w-full max-w-md p-8 backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl shadow-2xl">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-cyan-500/20 mb-4 animate-pulse">
+              <Users className="w-8 h-8 text-cyan-400" />
+            </div>
+            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-purple-400">
+              进入平行世界
+            </h1>
+            <p className="text-slate-400 mt-2">Create or join a timeline connection</p>
+          </div>
+
+          <div className="space-y-6">
+            <button
+              onClick={() => {
+                const newId = Math.random().toString(36).substring(2, 8);
+                setRoomId(newId);
+              }}
+              className="w-full py-4 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 rounded-xl font-bold text-lg shadow-lg shadow-cyan-500/20 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2"
+            >
+              <Atom className="w-5 h-5" />
+              创建新房间
+            </button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-black text-slate-500">OR</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="relative">
+                <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                <input
+                  type="text"
+                  value={roomInput}
+                  onChange={(e) => setRoomInput(e.target.value)}
+                  placeholder="输入房间号..."
+                  className="w-full bg-slate-900/50 border border-white/10 focus:border-purple-500 rounded-xl py-3 pl-12 pr-4 text-white placeholder-slate-500 outline-none transition-all"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  if (roomInput.trim()) setRoomId(roomInput.trim());
+                }}
+                disabled={!roomInput.trim()}
+                className="w-full py-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed border border-white/10 rounded-xl font-medium text-slate-300 transition-all flex items-center justify-center gap-2"
+              >
+                加入房间
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-8 text-center">
+            <button
+              onClick={() => setRoomId("default")}
+              className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
+            >
+              Enter Default Public Lobby
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!hasDigitalTwin) {
     return (
@@ -378,6 +472,7 @@ export default function UniverseView({ user }) {
           onBackToMatching={handleBackToMatching}
           onLogout={handleLogout}
           isPrivateChat={is1on1}
+          roomId={roomId}
         />
         {showUserStatus && (
           <UserAgentStatus
@@ -416,6 +511,11 @@ export default function UniverseView({ user }) {
         <header className="h-16 flex items-center justify-between px-8 border-b border-white/5 backdrop-blur-sm">
           <div className="flex items-center gap-4 text-sm text-slate-400 font-mono">
             <span>SECTOR: {is1on1 ? 'PRIVATE' : 'ALPHA'}</span>
+            <span className="text-slate-700">|</span>
+            <span className="text-cyan-400 font-bold flex items-center gap-1">
+              <Hash className="w-3 h-3" />
+              {roomId}
+            </span>
             <span className="text-slate-700">|</span>
             <span>NODES: {selectedAgents.filter(a => !a.disabled).length}</span>
           </div>

@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Square, User, Bot, UserCircle, FileText, X, Loader, LogOut, ArrowLeft, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { api } from '../services/api';
 
-export default function ChatInterface({ selectedAgents = [], onUserClick, onBackToMatching, onLogout }) {
+export default function ChatInterface({ selectedAgents = [], onUserClick, onBackToMatching, onLogout, roomId }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [aiControlEnabled, setAiControlEnabled] = useState(true); // true=用户控制, false=AI自由行动
   const [waitingForInput, setWaitingForInput] = useState(false); // 是否正在等待用户输入
   const [waitingRoleName, setWaitingRoleName] = useState(''); // 等待输入的角色名称
+  const [countdownEnd, setCountdownEnd] = useState(null);
+  const [remainingSeconds, setRemainingSeconds] = useState(null);
   const [ws, setWs] = useState(null);
   const [userAgentRoleCode, setUserAgentRoleCode] = useState(null); // 用户agent的role_code
   const [reportData, setReportData] = useState(null); // 社交报告数据
@@ -26,8 +29,8 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
     // 开发环境使用8001端口，生产环境使用当前页面的域名（通过反向代理）
     const isDev = process.env.NODE_ENV === 'development';
     const websocketUrl = isDev
-      ? `${protocol}//${host}:8001/ws/${clientId.current}`
-      : `${protocol}//${host}/ws/${clientId.current}`;
+      ? `${protocol}//${host}:8001/ws/${roomId || 'default'}/${clientId.current}`
+      : `${protocol}//${host}/ws/${roomId || 'default'}/${clientId.current}`;
     const websocket = new WebSocket(websocketUrl);
 
     websocket.onopen = async () => {
@@ -81,6 +84,26 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // 倒计时 effect：当 countdownEnd 被设置时，启动 interval 更新剩余秒数
+  useEffect(() => {
+    if (!countdownEnd) {
+      setRemainingSeconds(null);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const diff = Math.ceil((new Date(countdownEnd).getTime() - Date.now()) / 1000);
+      setRemainingSeconds(diff > 0 ? diff : 0);
+      if (diff <= 0) {
+        setCountdownEnd(null);
+      }
+    };
+
+    updateRemaining();
+    const id = setInterval(updateRemaining, 500);
+    return () => clearInterval(id);
+  }, [countdownEnd]);
+
   const handleWebSocketMessage = (data) => {
     if (data.type === 'message') {
       setMessages(prev => [...prev, {
@@ -109,6 +132,34 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
       console.log('⏳ 等待用户输入:', data.data);
       setWaitingForInput(true);
       setWaitingRoleName(data.data.role_name || '你的角色');
+    } else if (data.type === 'input_countdown_start') {
+      // 后端告知应该开始本地倒计时（不会每秒推送），前端自己跑计时器
+      console.log('🔔 倒计时开始:', data.data);
+      setWaitingForInput(true);
+      setWaitingRoleName(data.data.role_name || '你的角色');
+      if (data.data.deadline) {
+        try {
+          setCountdownEnd(new Date(data.data.deadline));
+        } catch (e) {
+          // fallback: use duration
+          const dur = parseInt(data.data.duration || 60, 10);
+          setCountdownEnd(new Date(Date.now() + dur * 1000));
+        }
+      } else if (data.data.duration) {
+        const dur = parseInt(data.data.duration || 60, 10);
+        setCountdownEnd(new Date(Date.now() + dur * 1000));
+      }
+    } else if (data.type === 'input_countdown_cancel') {
+      // 用户已回复，取消倒计时显示
+      console.log('🔕 倒计时取消:', data.data);
+      setCountdownEnd(null);
+      setRemainingSeconds(null);
+    } else if (data.type === 'input_countdown_timeout') {
+      // 倒计时到期，后端已跳过
+      console.log('⏱️ 倒计时超时:', data.data);
+      setCountdownEnd(null);
+      setRemainingSeconds(null);
+      setWaitingForInput(false);
     } else if (data.type === 'possession_mode_updated') {
       // Possession mode 已更新
       console.log('🔄 控制模式已更新:', data.data);
@@ -147,15 +198,15 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
       // 当前正在播放，点击停止
       setIsPlaying(false);
       ws.send(JSON.stringify({
-        type: 'control',
-        action: 'stop'
+        type: 'control_command',
+        command: 'stop'
       }));
     } else {
       // 当前已停止，点击开始
       setIsPlaying(true);
       ws.send(JSON.stringify({
-        type: 'control',
-        action: 'start'
+        type: 'control_command',
+        command: 'start'
       }));
     }
   };
@@ -248,14 +299,18 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
   const handleClearMessages = async () => {
     if (window.confirm('确定要清除所有聊天消息吗？这将完全重置对话历史。')) {
       try {
+        const response = await api.clearChatHistory(roomId);
+        /*
         const response = await fetch('/api/clear-chat-history', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          }
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ room_id: roomId })
         });
+        */
 
-        if (response.ok) {
+        if (response.success) {
           setMessages([]);
           console.log('Chat history cleared successfully');
         } else {
@@ -483,8 +538,13 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
 
         {waitingForInput ? (
           <div className="mb-3 px-4 py-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
-            <p className="text-sm text-cyan-400">
-              ⏳ 轮到 <span className="font-semibold">{waitingRoleName}</span> 发言，请输入内容...
+            <p className="text-sm text-cyan-400 flex items-center gap-2">
+              <span>⏳ 轮到 <span className="font-semibold">{waitingRoleName}</span> 发言，请输入内容...</span>
+              {remainingSeconds !== null && (
+                <span className="ml-3 inline-block text-xs bg-black/40 px-2 py-0.5 rounded text-cyan-200">
+                  剩余: {remainingSeconds}s
+                </span>
+              )}
             </p>
           </div>
         ) : (

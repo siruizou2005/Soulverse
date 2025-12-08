@@ -446,9 +446,18 @@ class Server():
                 yield ("system","",f"--------- Setted Script ---------\n{script_text}\n", None) 
                 self.event_history.append(self.event)
             if self.mode == "free":
-                # 获取用户角色代码（如果存在）
-                user_role_code = getattr(self, '_user_role_code', None)
-                
+                # 获取当前所有被用户选中的角色（支持多个选中）
+                user_role_codes = set()
+                single_user_role = getattr(self, '_user_role_code', None)
+                multi_user_roles = getattr(self, '_user_role_codes', None)
+                if multi_user_roles:
+                    try:
+                        user_role_codes.update(set(multi_user_roles))
+                    except Exception:
+                        pass
+                if single_user_role:
+                    user_role_codes.add(single_user_role)
+
                 for role_code in self.role_codes:
                     # 在Goal Setting阶段，用户角色也会设置motivation，但不yield消息
                     # 因为Goal Setting是自动的，不需要用户输入
@@ -472,17 +481,13 @@ class Server():
                                 act_type="goal setting",
                                 record_id = record_id)
                     
-                    # 如果是用户角色，不yield消息（Goal Setting阶段不需要用户输入）
-                    # 但如果是其他角色，正常yield消息
-                    if user_role_code and role_code == user_role_code:
-                        # 用户角色：只记录，不yield，避免在Goal Setting阶段要求用户输入
+                    # 如果是用户选中的角色，则只记录不yield；其它角色正常yield
+                    if user_role_codes and role_code in user_role_codes:
                         continue
                     else:
-                        # 其他角色：正常yield消息
                         yield ("role",role_code,info_text,record_id)
-                    
+
             self._save_current_simulation("goal")
-            
         yield ("system","","-- Simulation Started --",None)
         selected_role_codes = []
         # Simulating
@@ -545,7 +550,17 @@ class Server():
                         recent_k = 3
                         last_is_user = False
                         last_user_text = ""
-                        user_role_code = getattr(self, '_user_role_code', None)
+                        # 支持单值或多值用户控制角色
+                        user_role_codes = set()
+                        single_user_role = getattr(self, '_user_role_code', None)
+                        multi_user_roles = getattr(self, '_user_role_codes', None)
+                        if multi_user_roles:
+                            try:
+                                user_role_codes.update(set(multi_user_roles))
+                            except Exception:
+                                pass
+                        if single_user_role:
+                            user_role_codes.add(single_user_role)
                         
                         if hasattr(self.history_manager, 'detailed_history') and len(self.history_manager.detailed_history) > 0:
                             last = self.history_manager.detailed_history[-1]
@@ -554,9 +569,9 @@ class Server():
                             
                             # 检查是否是用户输入（用户控制模式）
                             is_user_input = last_act_type in ('user_input', 'user_input_placeholder')
-                            # 检查是否是用户角色发言（AI行动模式）
-                            is_user_role_speaking = (user_role_code and 
-                                                    last_role_code == user_role_code and 
+                            # 检查是否是用户角色发言（AI行动模式），支持多个被控制角色
+                            is_user_role_speaking = (user_role_codes and 
+                                                    last_role_code in user_role_codes and 
                                                     last_act_type in ('plan', 'single', 'multi'))
                             
                             last_is_user = is_user_input or is_user_role_speaking
@@ -573,8 +588,14 @@ class Server():
                             history_text = focus_prefix + history_text
                             
                             # 如果上一条是用户输入或用户角色发言，在提示中明确要求选择其他角色
-                            if user_role_code:
-                                user_name = self.performers[user_role_code].nickname if user_role_code in self.performers else "用户"
+                            if user_role_codes:
+                                # 取第一个可见的用户角色用于提示
+                                user_in_perf = None
+                                for r in user_role_codes:
+                                    if r in self.performers:
+                                        user_in_perf = r
+                                        break
+                                user_name = self.performers[user_in_perf].nickname if user_in_perf else "用户"
                                 history_text = f"【重要】上一条是{user_name}的发言，请选择其他角色进行回应，不要立即选择{user_name}。\n" + history_text
                         
                         # 调用orchestrator决定下一个行动的角色
@@ -599,10 +620,20 @@ class Server():
                             # 检查是否匹配成功
                             if role_code not in self.role_codes:
                                 print(f"[调度ERROR] 无法匹配角色！Orchestrator返回: '{next_actor_result}', 无法找到对应的role_code")
-                                # 如果匹配失败，优先选择用户角色
-                                user_role_code = getattr(self, '_user_role_code', None)
-                                if user_role_code and user_role_code in group:
-                                    role_code = user_role_code
+                                # 如果匹配失败，优先选择用户角色（支持多用户）
+                                user_role_codes = set()
+                                single_user_role = getattr(self, '_user_role_code', None)
+                                multi_user_roles = getattr(self, '_user_role_codes', None)
+                                if multi_user_roles:
+                                    try:
+                                        user_role_codes.update(set(multi_user_roles))
+                                    except Exception:
+                                        pass
+                                if single_user_role:
+                                    user_role_codes.add(single_user_role)
+                                intersect = [r for r in user_role_codes if r in group]
+                                if intersect:
+                                    role_code = intersect[0]
                                     print(f"[调度] 匹配失败，优先选择用户角色: {role_code}")
                                 else:
                                     # 选择第一个未发言的角色
@@ -621,12 +652,26 @@ class Server():
                                         print(f"[调度] 匹配失败，选择group第一个: {role_code}")
                     
                     # 检查是否是用户选择的角色（如果是，根据 possession_mode 决定行为）
-                    user_role_code = getattr(self, '_user_role_code', None)
-                    possession_mode = getattr(self, '_possession_mode', True)  # True=用户控制, False=AI自由行动
+                    # 支持多个用户控制的角色
+                    user_role_codes = set()
+                    single_user_role = getattr(self, '_user_role_code', None)
+                    multi_user_roles = getattr(self, '_user_role_codes', None)
+                    if multi_user_roles:
+                        try:
+                            user_role_codes.update(set(multi_user_roles))
+                        except Exception:
+                            pass
+                    if single_user_role:
+                        user_role_codes.add(single_user_role)
                     
-                    print(f"[检查] role_code={role_code}, user_role_code={user_role_code}, possession_mode={possession_mode}")
-                    
-                    if user_role_code and role_code == user_role_code and possession_mode:
+                    # 使用 per-role possession mode
+                    possession_modes = getattr(self, 'possession_modes', {})
+                    # 默认为 False (用户手动控制)，如果在 map 中且为 True，则为 AI 接管
+                    is_ai_possession = possession_modes.get(role_code, False)
+
+                    print(f"[检查] role_code={role_code}, user_role_codes={user_role_codes}, ai_possession={is_ai_possession}")
+
+                    if user_role_codes and role_code in user_role_codes and not is_ai_possession:
                         # 用户控制模式：系统选择了用户控制的角色，不调用plan()生成计划，而是创建占位消息等待用户输入
                         record_id = str(uuid.uuid4())
                         placeholder_text = "__USER_INPUT_PLACEHOLDER__"
@@ -902,8 +947,18 @@ class Server():
         start_idx = len(self.history_manager)
         for round in range(max_rounds):
             # 如果当前轮到的角色是用户控制的Agent，则跳过自动回复，等待用户输入
-            user_role_code = getattr(self, '_user_role_code', None)
-            if user_role_code and acting_role_code == user_role_code:
+            # 支持单值或多值用户控制角色
+            user_role_codes = set()
+            single_user_role = getattr(self, '_user_role_code', None)
+            multi_user_roles = getattr(self, '_user_role_codes', None)
+            if multi_user_roles:
+                try:
+                    user_role_codes.update(set(multi_user_roles))
+                except Exception:
+                    pass
+            if single_user_role:
+                user_role_codes.add(single_user_role)
+            if user_role_codes and acting_role_code in user_role_codes:
                 placeholder_id = str(uuid.uuid4())
                 placeholder_text = "__USER_INPUT_PLACEHOLDER__"
                 self.log(f"{self.performers[acting_role_code].role_name}: (等待用户输入)")
@@ -992,8 +1047,17 @@ class Server():
                 roles_info_text=self._get_group_members_info_text(remove_list_elements(group, acted_role_code), status=True)))
 
             # 如果轮到用户控制的角色，跳过自动生成对话，等待用户输入
-            user_role_code = getattr(self, '_user_role_code', None)
-            if user_role_code and acting_role_code == user_role_code:
+            user_role_codes = set()
+            single_user_role = getattr(self, '_user_role_code', None)
+            multi_user_roles = getattr(self, '_user_role_codes', None)
+            if multi_user_roles:
+                try:
+                    user_role_codes.update(set(multi_user_roles))
+                except Exception:
+                    pass
+            if single_user_role:
+                user_role_codes.add(single_user_role)
+            if user_role_codes and acting_role_code in user_role_codes:
                 placeholder_id = str(uuid.uuid4())
                 placeholder_text = "__USER_INPUT_PLACEHOLDER__"
                 self.log(f"{self.performers[acting_role_code].role_name}: (等待用户输入)")

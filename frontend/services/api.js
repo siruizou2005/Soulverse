@@ -79,7 +79,7 @@ export const api = {
       credentials: 'include',
       body: formData
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       let errorMessage = '动漫化处理失败';
@@ -91,7 +91,7 @@ export const api = {
       }
       return { success: false, error: errorMessage, detail: errorMessage };
     }
-    
+
     return response.json();
   },
 
@@ -130,10 +130,11 @@ export const api = {
     return response.json();
   },
 
-  async createAgentFromFile(userId, file) {
+  async createAgentFromFile(userId, file, roomId = null) {
     const formData = new FormData();
     formData.append('file', file);
     if (userId) formData.append('user_id', userId);
+    if (roomId) formData.append('room_id', roomId);
 
     const response = await fetch(`${API_BASE}/create-agent-from-file`, {
       method: 'POST',
@@ -142,86 +143,126 @@ export const api = {
     return response.json();
   },
 
-  async createUserAgent(userId) {
+  async createUserAgent(userId, roomId = null) {
     // 生成唯一的role_code
     const roleCode = `user_${userId}_${Date.now()}`;
+    const body = {
+      user_id: userId,
+      role_code: roleCode
+    };
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/create-user-agent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        role_code: roleCode
-      })
+      body: JSON.stringify(body)
     });
     return response.json();
   },
 
   // 恢复用户 agent 到沙盒（从已保存的数字孪生数据）
-  async restoreUserAgent(roleCode) {
+  async restoreUserAgent(roleCode, roomId = null) {
+    const body = { role_code: roleCode };
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/restore-user-agent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ role_code: roleCode })
+      body: JSON.stringify(body)
     });
     return response.json();
   },
 
   // 添加预设NPC到沙盒
-  async addPresetNPC(presetId, customName = null) {
+  async addPresetNPC(presetId, customName = null, roomId = null) {
+    const body = {
+      preset_id: presetId,
+      custom_name: customName
+    };
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/add-preset-npc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        preset_id: presetId,
-        custom_name: customName
-      })
+      body: JSON.stringify(body)
     });
     return response.json();
   },
 
   // 清空预设agents
-  async clearPresetAgents() {
+  async clearPresetAgents(roomId = null) {
+    const body = {};
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/clear-preset-agents`, {
       method: 'POST',
-      credentials: 'include'
+      headers: { 'Content-Type': 'application/json' }, // Added content-type for body
+      credentials: 'include',
+      body: JSON.stringify(body)
     });
     return response.json();
   },
 
   // 动态切换Agent沙盒状态
-  async toggleAgentSandbox(roleCode, enabled, presetId) {
+  async toggleAgentSandbox(roleCode, enabled, presetId, roomId = null) {
+    const body = {
+      role_code: roleCode,
+      enabled: enabled,
+      preset_id: presetId
+    };
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/toggle-agent-sandbox`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        role_code: roleCode,
-        enabled: enabled,
-        preset_id: presetId
-      })
+      body: JSON.stringify(body)
     });
     return response.json();
   },
 
   // 开启1对1聊天
-  async start1on1Chat(targetRoleCode, presetId) {
+  async start1on1Chat(targetRoleCode, presetId, roomId = null) {
+    const body = {
+      target_role_code: targetRoleCode,
+      preset_id: presetId
+    };
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/start-1on1-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({
-        target_role_code: targetRoleCode,
-        preset_id: presetId
-      })
+      body: JSON.stringify(body)
     });
     return response.json();
   },
 
   // 重置沙盒
-  async resetSandbox() {
+  // 重置沙盒
+  async resetSandbox(roomId = null) {
+    const body = {};
+    if (roomId) body.room_id = roomId;
+
     const response = await fetch(`${API_BASE}/reset-sandbox`, {
       method: 'POST',
-      credentials: 'include'
+      headers: { 'Content-Type': 'application/json' }, // Added content-type
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    return response.json();
+  },
+
+  // Clear chat history
+  async clearChatHistory(roomId = null) {
+    const body = {};
+    if (roomId) body.room_id = roomId;
+
+    const response = await fetch(`${API_BASE}/clear-chat-history`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
     });
     return response.json();
   }
