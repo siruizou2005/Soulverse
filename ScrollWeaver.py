@@ -507,9 +507,13 @@ class Server():
             # Characters in next scene
             # Soulverse模式：所有角色都在同一场景
             if self.is_soulverse_mode:
-                # 强制使用所有角色
-                group = self.role_codes
-                print(f"[Soulverse模式] 本轮参与的角色: {[self.performers[c].nickname for c in group]}")
+                # 强制使用所有角色（过滤掉不存在的agents）
+                group = [rc for rc in self.role_codes if rc in self.performers]
+                if group:
+                    print(f"[Soulverse模式] 本轮参与的角色: {[self.performers[c].nickname for c in group]}")
+                else:
+                    print(f"[Soulverse模式] Warning: No valid agents found")
+                    continue  # 跳过这一轮
             elif scene_mode:
                 group = self._name2code(
                     self.orchestrator.decide_scene_actors(
@@ -517,11 +521,19 @@ class Server():
                         self.history_manager.get_recent_history(5),
                         self.event,
                         list(set(selected_role_codes + list(self.moving_roles_info.keys())))))
+                # 过滤掉不存在的agents
+                group = [rc for rc in group if rc in self.performers]
                 selected_role_codes += group
                 if len(selected_role_codes) >= len(self.role_codes):
                     selected_role_codes = []
             else:
-                group = self.role_codes
+                group = [rc for rc in self.role_codes if rc in self.performers]
+            
+            # 如果group为空，跳过这一轮
+            if not group:
+                print(f"[Round {current_round}] Warning: No valid agents in group, skipping")
+                continue
+            
             self.current_status['group'] = group
             self.current_status['location_code'] = self.performers[group[0]].location_code
             self.scene_characters[str(current_round)] = group
@@ -534,13 +546,19 @@ class Server():
 
             sub_round = sub_start_round
             for sub_round in range(sub_start_round,3):
+                # 过滤group中不存在的agents
+                valid_group = [rc for rc in group if rc in self.performers]
+                if not valid_group:
+                    print(f"[Round {current_round}, Sub-round {sub_round}] Warning: No valid agents in group, skipping")
+                    break
+                
                 if self.mode == "script":    
                     self.script_instruct(self.progress)
                 else:
-                    for role_code in group:
+                    for role_code in valid_group:
                         self.performers[role_code].update_goal(other_roles_status=self._get_status_text(self.role_codes))
 
-                for role_code in group:
+                for role_code in valid_group:
                     # 正常决定下一个行动的角色（由系统根据场景逻辑自然决定）
                     if scene_mode:
                         # 若最近一条为用户输入或用户角色发言，则放大历史窗口并加入用户焦点导语
@@ -723,7 +741,18 @@ class Server():
             
     # Main functions using llm    
     def implement_next_plan(self,role_code: str, group: List[str]):
-        other_roles_info = self._get_group_members_info_dict(group)
+        # 检查 agent 是否存在（可能在对话进行中被移除）
+        if role_code not in self.performers:
+            self.log(f"Warning: Agent {role_code} not found, skipping plan implementation")
+            return
+        
+        # 过滤group中不存在的agents
+        valid_group = [rc for rc in group if rc in self.performers]
+        if not valid_group:
+            self.log(f"Warning: No valid agents in group, skipping plan implementation")
+            return
+        
+        other_roles_info = self._get_group_members_info_dict(valid_group)
         plan = self.performers[role_code].plan(
             other_roles_info = other_roles_info,
             available_locations = self.orchestrator.locations,
@@ -764,24 +793,31 @@ class Server():
         
         if plan["target_role_codes"]:
             plan["target_role_codes"] = self._name2code(plan["target_role_codes"])
+            # 再次过滤不存在的agents
+            plan["target_role_codes"] = [rc for rc in plan["target_role_codes"] if rc in self.performers]
             
             
         record_id = str(uuid.uuid4())
-        self.log(f"-Action-\n{self.performers[role_code].role_name}: "+ info_text)
+        performer = self.performers[role_code]
+        self.log(f"-Action-\n{performer.role_name}: "+ info_text)
+        # 构建有效的group（包含role_code和target_role_codes）
+        valid_group = [role_code] + plan["target_role_codes"]
+        valid_group = [rc for rc in valid_group if rc in self.performers]  # 再次过滤
+        
         self.record(role_code = role_code,
                     detail = plan["detail"],
                     actor_type = 'role',
                     act_type = "plan",
                     actor = role_code,
-                    group = plan["target_role_codes"] + [role_code],
+                    group = valid_group,
                     plan = plan,
                     record_id = record_id
                         )
         yield ("role", role_code, info_text, record_id)
 
-        if plan["interact_type"] == "single" and len(plan["target_role_codes"]) == 1 and plan["target_role_codes"][0] in group:
+        if plan["interact_type"] == "single" and len(plan["target_role_codes"]) == 1 and plan["target_role_codes"][0] in valid_group:
             yield from self.start_single_role_interaction(plan, record_id)
-        elif plan["interact_type"] == "multi" and len(plan["target_role_codes"]) > 1 and set(plan["target_role_codes"]).issubset(set(group))  :
+        elif plan["interact_type"] == "multi" and len(plan["target_role_codes"]) > 1 and set(plan["target_role_codes"]).issubset(set(valid_group))  :
             yield from self.start_multi_role_interaction(plan, record_id)
         elif plan["interact_type"] == "enviroment":
             yield from self.start_enviroment_interaction(plan,role_code, record_id)
@@ -939,10 +975,16 @@ class Server():
         interaction = plan
         acted_role_code = interaction["role_code"]
         acting_role_code = interaction["target_role_codes"][0]
-        if acting_role_code not in self.role_codes:
-            print(f"Warning: Role {acting_role_code} does not exist.")
+        
+        # 检查agents是否存在（可能在对话进行中被移除）
+        if acted_role_code not in self.performers:
+            print(f"Warning: Role {acted_role_code} does not exist in performers.")
             return
-        self.current_status['group'] = [acted_role_code,acting_role_code]
+        if acting_role_code not in self.performers:
+            print(f"Warning: Role {acting_role_code} does not exist in performers.")
+            return
+        
+        self.current_status['group'] = [acted_role_code, acting_role_code]
         
         start_idx = len(self.history_manager)
         for round in range(max_rounds):
@@ -1029,22 +1071,32 @@ class Server():
 
         interaction = plan
         acted_role_code = interaction["role_code"]
-        group = interaction["target_role_codes"]
+        group = list(interaction["target_role_codes"])  # 创建副本
         group.append(acted_role_code)
         
-        for code in group:
-            if code not in self.role_codes:
-                print(f"Warning: Role {code} does not exist.")
-                return
-        self.current_status['group'] = group
+        # 过滤掉不存在的agents
+        valid_group = [code for code in group if code in self.performers]
+        if not valid_group:
+            print(f"Warning: No valid agents in group for multi_role_interaction.")
+            return
+        if acted_role_code not in self.performers:
+            print(f"Warning: Acted role {acted_role_code} does not exist.")
+            return
+        
+        self.current_status['group'] = valid_group
         
         start_idx = len(self.history_manager)
-        other_roles_info = self._get_group_members_info_dict(group)
+        other_roles_info = self._get_group_members_info_dict(valid_group)
         
         for round in range(max_rounds):
             acting_role_code = self._name2code(self.orchestrator.decide_next_actor(
                 history_text="\n".join(self.history_manager.get_recent_history(3)),
-                roles_info_text=self._get_group_members_info_text(remove_list_elements(group, acted_role_code), status=True)))
+                roles_info_text=self._get_group_members_info_text(remove_list_elements(valid_group, acted_role_code), status=True)))
+            
+            # 检查acting_role_code是否存在
+            if acting_role_code not in self.performers:
+                print(f"Warning: Acting role {acting_role_code} does not exist, skipping interaction.")
+                break
 
             # 如果轮到用户控制的角色，跳过自动生成对话，等待用户输入
             user_role_codes = set()
@@ -1067,7 +1119,7 @@ class Server():
                     actor_type='role',
                     act_type="user_input_placeholder",
                     actor=acting_role_code,
-                    group=group,
+                    group=valid_group,
                     planning_role_code=plan["role_code"],
                     round=round,
                     record_id=placeholder_id
@@ -1092,7 +1144,7 @@ class Server():
                         detail = detail,
                         actor_type = 'role',
                         act_type = "multi",
-                        group = group,
+                        group = valid_group,
                         actor = acting_role_code,
                         planning_role_code = plan["role_code"],
                         round = round,
@@ -1258,13 +1310,17 @@ class Server():
                 self.moving_roles_info[role_code]["distance"] -= 1
     
     def _find_group(self,role_code):
-        return [code for code in self.role_codes if self.performers[code].location_code==self.performers[role_code].location_code]
+        # 检查role_code是否存在
+        if role_code not in self.performers:
+            return []
+        target_location = self.performers[role_code].location_code
+        return [code for code in self.role_codes if code in self.performers and self.performers[code].location_code==target_location]
     
     def _find_roles_at_location(self,location_code,name = False):
         if name:
-            return [self.performers[code].nickname for code in self.role_codes if self.performers[code].location_code==location_code]
+            return [self.performers[code].nickname for code in self.role_codes if code in self.performers and self.performers[code].location_code==location_code]
         else:
-            return [code for code in self.role_codes if self.performers[code].location_code==location_code]
+            return [code for code in self.role_codes if code in self.performers and self.performers[code].location_code==location_code]
 
     def _get_status_text(self,group):
         status_lines = []
@@ -1563,17 +1619,57 @@ class ScrollWeaver():
             elif hasattr(agent, 'preset_config') and agent.preset_config:
                 chara_info["mbti"] = agent.preset_config.get("mbti", "")
                 chara_info["interests"] = agent.preset_config.get("interests", [])
-                chara_info["personality"] = agent.preset_config.get("personality", "")
                 chara_info["traits"] = agent.preset_config.get("tags", [])
                 chara_info["social_goals"] = agent.preset_config.get("social_goals", [])
+                # Add complete preset data for profile viewing (structured format)
+                if hasattr(agent, 'personality_profile') and agent.personality_profile:
+                    # Extract big_five from personality_profile
+                    if hasattr(agent.personality_profile, 'core_traits') and hasattr(agent.personality_profile.core_traits, 'big_five'):
+                        big_five = agent.personality_profile.core_traits.big_five
+                        # big_five is a dict, convert to dict if needed
+                        if isinstance(big_five, dict):
+                            big_five_dict = big_five
+                        else:
+                            big_five_dict = big_five.__dict__ if hasattr(big_five, '__dict__') else {}
+                        chara_info["personality"] = {
+                            "mbti": agent.preset_config.get("mbti", ""),
+                            "big_five": big_five_dict,
+                            "values": agent.preset_config.get("values", []),
+                            "defense_mechanism": agent.preset_config.get("defense_mechanism", "")
+                        }
+                    else:
+                        # Fallback: use preset_config data
+                        chara_info["personality"] = {
+                            "mbti": agent.preset_config.get("mbti", ""),
+                            "big_five": agent.preset_config.get("big_five", {}),
+                            "values": agent.preset_config.get("values", []),
+                            "defense_mechanism": agent.preset_config.get("defense_mechanism", "")
+                        }
+                elif agent.preset_config.get("big_five"):
+                    # Use big_five from preset_config if available
+                    chara_info["personality"] = {
+                        "mbti": agent.preset_config.get("mbti", ""),
+                        "big_five": agent.preset_config.get("big_five", {}),
+                        "values": agent.preset_config.get("values", []),
+                        "defense_mechanism": agent.preset_config.get("defense_mechanism", "")
+                    }
+                else:
+                    # Fallback: keep original format for compatibility
+                    chara_info["personality"] = agent.preset_config.get("personality", "")
             characters_info.append(chara_info)
         return characters_info
 
     def generate_next_message(self):
         message_type, code, text,message_id = next(self.generator)
         if message_type == "role":
-            username = self.server.performers[code].role_name
-            icon_path = self.server.performers[code].icon_path
+            # 检查 agent 是否存在（可能在对话进行中被移除）
+            if code not in self.server.performers:
+                self.server.log(f"Warning: Agent {code} not found in generate_next_message, using fallback")
+                username = code  # 使用role_code作为fallback
+                icon_path = ""
+            else:
+                username = self.server.performers[code].role_name
+                icon_path = self.server.performers[code].icon_path
         else:
             username = message_type
             icon_path = ""
@@ -1584,7 +1680,8 @@ class ScrollWeaver():
             'text': text,
             'icon': icon_path,
             "uuid": message_id,
-            "scene": self.server.cur_round
+            "scene": self.server.cur_round,
+            "role_code": code if message_type == "role" else None  # 添加role_code字段用于前端区分不同用户
         }
         return message
         

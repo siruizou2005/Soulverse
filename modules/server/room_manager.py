@@ -27,6 +27,7 @@ class Room:
         self.pending_display_message: Dict[str, dict] = {}
         
         self.last_empty_time: Optional[datetime] = datetime.now() # Start empty
+        self.conversation_ended: bool = False  # 对话是否已结束（所有用户退出）
         
         
         # Initialize ScrollWeaver
@@ -71,19 +72,131 @@ class Room:
         
         # If room was empty, mark as active and resume story loop if needed
         was_empty = self.last_empty_time is not None
-        self.last_empty_time = None  # Active now
+        was_conversation_ended = self.conversation_ended
         
-        if was_empty:
-            print(f"[Room {self.room_id}] Client {client_id} connected, room was empty, resuming story loop")
+        if was_empty or was_conversation_ended:
+            # 重置对话结束标志，恢复对话
+            self.last_empty_time = None
+            self.conversation_ended = False
+            print(f"[Room {self.room_id}] Client {client_id} connected, {'resuming' if was_conversation_ended else 'starting'} story loop")
             # Ensure story loop is running
             await self.start_story_loop()
         
         if user_id:
-            # Check if this user already has an assigned agent in this room
+            # 自动绑定用户数字孪生
+            role_code = None
+            
+            # 检查用户是否已有agent在这个房间
             if user_id in self.user_agents:
                 role_code = self.user_agents[user_id]
-                self.user_selected_roles[client_id] = role_code
-                print(f"  -> Auto-linked Client {client_id} to User Agent {role_code} (User {user_id})")
+                # 验证agent是否仍然存在
+                if role_code not in self.scrollweaver.server.role_codes:
+                    # Agent不存在，需要重新恢复
+                    role_code = None
+                    del self.user_agents[user_id]
+            
+            # 如果没有role_code，尝试从用户数据恢复
+            digital_twin = None
+            if not role_code:
+                try:
+                    from sw_utils import load_json_file
+                    import os
+                    USERS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'users')
+                    user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+                    if os.path.exists(user_file):
+                        user_data = load_json_file(user_file)
+                        digital_twin = user_data.get('digital_twin')
+                        if digital_twin and digital_twin.get('role_code'):
+                            role_code = digital_twin['role_code']
+                            # 验证role_code格式
+                            if not role_code.startswith('digital_twin_user_'):
+                                print(f"[Room {self.room_id}] Warning: Invalid role_code format for user {user_id}: {role_code}")
+                                role_code = None
+                                digital_twin = None
+                except Exception as e:
+                    print(f"[Room {self.room_id}] Error loading user data for {user_id}: {e}")
+                    role_code = None
+                    digital_twin = None
+            
+            if role_code:
+                # 确保agent在沙盒中
+                if role_code not in self.scrollweaver.server.role_codes:
+                    # 自动恢复agent到沙盒
+                    try:
+                        # 如果还没有加载digital_twin，现在加载
+                        if not digital_twin:
+                            from sw_utils import load_json_file
+                            import os
+                            USERS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'users')
+                            user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+                            if os.path.exists(user_file):
+                                user_data = load_json_file(user_file)
+                                digital_twin = user_data.get('digital_twin')
+                        
+                        if not digital_twin:
+                            raise ValueError(f"Digital twin data not found for user {user_id}")
+                        
+                        from modules.soul_api_mock import get_soul_profile
+                        soul_profile = digital_twin.get('extracted_profile', {})
+                        
+                        core_traits = None
+                        if 'personality' in digital_twin and isinstance(digital_twin['personality'], dict) and 'mbti' in digital_twin['personality']:
+                             core_traits = digital_twin['personality']
+                        elif 'core_traits' in digital_twin:
+                             core_traits = digital_twin['core_traits']
+
+                        if not soul_profile and core_traits:
+                            soul_profile = {
+                                "mbti": core_traits.get('mbti'),
+                                "interests": core_traits.get('values', []),
+                                "social_goals": core_traits.get('values', []),
+                                "big_five": core_traits.get('big_five', {}),
+                                "defense_mechanism": core_traits.get('defense_mechanism'),
+                                "attachment_style": core_traits.get('attachment_style'),
+                                "personality": core_traits
+                            }
+
+                        if not soul_profile:
+                            soul_profile = get_soul_profile(user_id=user_id)
+                        
+                        # 创建用户 Agent
+                        user_agent = self.scrollweaver.server.add_user_agent(
+                            user_id=user_id,
+                            role_code=role_code,
+                            soul_profile=soul_profile
+                        )
+                        
+                        # 记录用户 Agent 映射
+                        self.user_agents[user_id] = role_code
+                        self.user_selected_roles[client_id] = role_code
+                        print(f"[Room {self.room_id}] Auto-restored and linked User Agent {role_code} (User {user_id})")
+                    except Exception as e:
+                        print(f"[Room {self.room_id}] Error auto-restoring user agent: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # 通知前端需要手动恢复
+                        try:
+                            await websocket.send_json({
+                                'type': 'agent_restore_needed',
+                                'data': {'role_code': role_code, 'message': 'Agent恢复失败，请重试'}
+                            })
+                        except Exception as send_error:
+                            print(f"[Room {self.room_id}] Error sending agent_restore_needed: {send_error}")
+                else:
+                    # Agent已存在，直接绑定
+                    self.user_selected_roles[client_id] = role_code
+                    self.user_agents[user_id] = role_code
+                    print(f"[Room {self.room_id}] Auto-linked Client {client_id} to User Agent {role_code} (User {user_id})")
+            else:
+                print(f"[Room {self.room_id}] User {user_id} has no digital twin, cannot auto-bind")
+                # 通知前端需要创建数字孪生
+                try:
+                    await websocket.send_json({
+                        'type': 'no_digital_twin',
+                        'data': {'message': '请先创建数字孪生'}
+                    })
+                except Exception as e:
+                    print(f"[Room {self.room_id}] Error sending no_digital_twin message: {e}")
                 
             # Store client_id for this user (for later lookups)
             self.user_client_map = getattr(self, 'user_client_map', {})
@@ -100,17 +213,17 @@ class Room:
             del self.active_connections[client_id]
             
         if not self.active_connections:
+            # 所有用户已退出，结束对话
             self.last_empty_time = datetime.now()
-            print(f"[Room {self.room_id}] All clients disconnected, room is now empty")
+            self.conversation_ended = True
+            print(f"[Room {self.room_id}] All clients disconnected, conversation ended")
+            # 注意：此时没有active_connections，无法广播消息
+            # 对话结束标志会在_story_loop()中检测并处理
         
         # Clean up client specific state
         if client_id in self.user_selected_roles:
             del self.user_selected_roles[client_id]
-            # Broadcast updated selection map - ensure it succeeds
-            try:
-                await self.broadcast_json({'type': 'role_selection_map', 'data': self.user_selected_roles})
-            except Exception as e:
-                print(f"[Room {self.room_id}] Error broadcasting role selection map on disconnect: {e}")
+            # 注意：role_selection_map广播已移除，因为用户数字孪生自动绑定，无需手动选择
         
         # If client was waiting for input, trigger timeout handling
         if was_waiting_input and client_id in self.pending_user_inputs:
@@ -459,6 +572,17 @@ class Room:
         return None
 
     async def handle_user_role_input(self, client_id: str, role_code: str, user_text: str, delay_display: bool = False, skip_broadcast: bool = False):
+        # 权限验证：确保用户只能控制自己的数字孪生
+        # 检查client_id是否绑定了这个role_code
+        if self.user_selected_roles.get(client_id) != role_code:
+            print(f"[Room {self.room_id}] Permission denied: Client {client_id} cannot control role {role_code}")
+            return
+        
+        # 验证role_code格式（必须是digital_twin_user_开头）
+        if not role_code.startswith('digital_twin_user_'):
+            print(f"[Room {self.room_id}] Invalid role_code format: {role_code}")
+            return
+        
         # ... logic from ConnectionManager ...
         try:
             record_id = str(uuid.uuid4())
@@ -484,7 +608,8 @@ class Room:
                 'uuid': record_id,
                 'scene': self.scrollweaver.server.cur_round,
                 'is_user': True,
-                'is_timeout_replacement': False  # 明确标记不是超时回复
+                'is_timeout_replacement': False,  # 明确标记不是超时回复
+                'role_code': role_code  # 添加role_code用于前端区分不同用户
             }
             
             if delay_display:
@@ -641,20 +766,34 @@ class Room:
             while True:
                 # Check active connections
                 if not self.active_connections:
-                    # Room is empty - pause story loop to save resources
-                    print(f"[Room {self.room_id}] No active connections, pausing story loop")
-                    self.last_empty_time = datetime.now()
-                    
-                    # Wait for connections with periodic checks
-                    empty_check_interval = 5  # Check every 5 seconds
-                    while not self.active_connections:
-                        await asyncio.sleep(empty_check_interval)
-                        # Check if room should be cleaned up (handled by RoomManager cleanup loop)
-                    
-                    # Connections restored - resume story loop
-                    print(f"[Room {self.room_id}] Active connections restored, resuming story loop")
-                    self.last_empty_time = None
-                    continue
+                    # 检查对话是否已结束
+                    if self.conversation_ended:
+                        # 所有用户已退出，结束对话
+                        print(f"[Room {self.room_id}] Conversation ended, stopping story loop")
+                        # 注意：此时没有active_connections，无法广播消息
+                        # 如果有客户端重新连接，会在connect()中收到conversation_ended状态
+                        break
+                    else:
+                        # Room is empty but conversation not ended - pause story loop to save resources
+                        print(f"[Room {self.room_id}] No active connections, pausing story loop")
+                        self.last_empty_time = datetime.now()
+                        
+                        # Wait for connections with periodic checks
+                        empty_check_interval = 5  # Check every 5 seconds
+                        while not self.active_connections and not self.conversation_ended:
+                            await asyncio.sleep(empty_check_interval)
+                            # Check if room should be cleaned up (handled by RoomManager cleanup loop)
+                        
+                        # 如果对话已结束，退出循环
+                        if self.conversation_ended:
+                            print(f"[Room {self.room_id}] Conversation ended during pause, stopping story loop")
+                            break
+                        
+                        # Connections restored - resume story loop
+                        print(f"[Room {self.room_id}] Active connections restored, resuming story loop")
+                        self.last_empty_time = None
+                        self.conversation_ended = False  # 重置标志
+                        continue
 
                 # Determine active user role across all clients?
                 # The logic in ConnectionManager assumed one user driving one role.
@@ -748,13 +887,23 @@ class Room:
                 username = message.get('username', '')
                 current_role_code = self._get_role_code_by_name(username)
                 
+                # Debug: Log role identification
+                print(f"[Room {self.room_id}] Message for role: {current_role_code} (username: {username})")
+                print(f"[Room {self.room_id}] User selected roles: {self.user_selected_roles}")
+                print(f"[Room {self.room_id}] ScrollWeaver _user_role_codes: {getattr(self.scrollweaver.server, '_user_role_codes', None)}")
+                
                 # Check if this role is controlled by any connected client
                 # Find client_id that controls this role
                 controlling_client_id = None
                 for cid, role in self.user_selected_roles.items():
                     if role == current_role_code:
                         controlling_client_id = cid
+                        print(f"[Room {self.room_id}] Found controlling client: {cid} for role {current_role_code}")
                         break
+                
+                if current_role_code and current_role_code.startswith('digital_twin_user_') and not controlling_client_id:
+                    print(f"[Room {self.room_id}] WARNING: User role {current_role_code} is not controlled by any client!")
+                    print(f"[Room {self.room_id}] Available user_selected_roles: {self.user_selected_roles}")
                 
                 if controlling_client_id and is_placeholder:
                     # It's a user turn!
@@ -788,6 +937,8 @@ class Room:
                                             act_type="user_input",
                                             record_id=record_id
                                         )
+                                        # If this is a user's digital twin, mark as user message so it displays on the right
+                                        is_user_digital_twin = current_role_code.startswith('digital_twin_user_')
                                         timeout_msg = {
                                             'username': username,
                                             'type': 'role',
@@ -796,8 +947,9 @@ class Room:
                                             'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
                                             'uuid': record_id,
                                             'scene': self.scrollweaver.server.cur_round,
-                                            'is_user': False,
-                                            'is_timeout_replacement': True
+                                            'is_user': is_user_digital_twin,  # User's digital twin messages should display on the right
+                                            'is_timeout_replacement': True,
+                                            'role_code': current_role_code  # Include role_code for frontend reference
                                         }
                                         await self.broadcast_json({'type': 'message', 'data': timeout_msg})
                                 except Exception as e:
@@ -831,10 +983,11 @@ class Room:
                          try:
                              timeout = config.get('user_input_timeout', 60)
 
-                             # Broadcast countdown start to all clients so frontend can show local timer
+                             # Send countdown start ONLY to the controlling client
+                             # Other clients should NOT enter input mode
                              try:
                                  deadline = (datetime.utcnow() + timedelta(seconds=timeout)).isoformat() + 'Z'
-                                 await self.broadcast_json({
+                                 await ws.send_json({
                                      'type': 'input_countdown_start',
                                      'data': {
                                          'role_name': username,
@@ -842,6 +995,11 @@ class Room:
                                          'duration': int(timeout),
                                          'deadline': deadline
                                      }
+                                 })
+                                 # Notify other clients that someone is inputting (but they shouldn't enter input mode)
+                                 await self.broadcast_json_except(controlling_client_id, {
+                                     'type': 'status_update',
+                                     'data': {'status': f"{username}正在输入..."}
                                  })
                              except Exception:
                                  pass
@@ -910,12 +1068,13 @@ class Room:
                                         'uuid': original_uuid,
                                         'scene': self.scrollweaver.server.cur_round,
                                         'is_user': True,
-                                        'is_timeout_replacement': False
+                                        'is_timeout_replacement': False,
+                                        'role_code': current_role_code  # 添加role_code用于前端区分不同用户
                                       }
                                       await self.broadcast_json({'type': 'message', 'data': echo_msg})
                              else:
-                                 # Fallback
-                                 await self.handle_user_role_input(controlling_client_id, current_role_code, user_text)
+                                 # Fallback: 确保消息被广播
+                                 await self.handle_user_role_input(controlling_client_id, current_role_code, user_text, delay_display=False, skip_broadcast=False)
 
                          except asyncio.TimeoutError:
                              # User did not respond in time. Notify room and skip.
@@ -997,6 +1156,8 @@ class Room:
                                              )
                                              
                                              # Broadcast timeout replacement message with marker
+                                             # If this is a user's digital twin, mark as user message so it displays on the right
+                                             is_user_digital_twin = current_role_code.startswith('digital_twin_user_')
                                              timeout_msg = {
                                                  'username': username,
                                                  'type': 'role',
@@ -1005,8 +1166,9 @@ class Room:
                                                  'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
                                                  'uuid': record_id,
                                                  'scene': self.scrollweaver.server.cur_round,
-                                                 'is_user': False,
-                                                 'is_timeout_replacement': True
+                                                 'is_user': is_user_digital_twin,  # User's digital twin messages should display on the right
+                                                 'is_timeout_replacement': True,
+                                                 'role_code': current_role_code  # Include role_code for frontend reference
                                              }
                                              await self.broadcast_json({'type': 'message', 'data': timeout_msg})
                                              
@@ -1046,6 +1208,19 @@ class Room:
                             message['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         if 'type' not in message:
                             message['type'] = 'role'
+                        # 确保role_code存在（从actor、role_code或code字段获取）
+                        if 'role_code' not in message:
+                            if 'actor' in message:
+                                message['role_code'] = message.get('actor')
+                            elif 'code' in message:
+                                message['role_code'] = message.get('code')
+                            else:
+                                # 尝试从username推断role_code
+                                username = message.get('username', '')
+                                if username:
+                                    inferred_role_code = self._get_role_code_by_name(username)
+                                    if inferred_role_code:
+                                        message['role_code'] = inferred_role_code
                         
                         # Debug: Log before broadcasting
                         print(f"[Room {self.room_id}] Broadcasting message: username={message.get('username')}, text_preview={str(message.get('text', ''))[:50]}, active_connections={len(self.active_connections)}")

@@ -290,8 +290,22 @@ export default function CreationWizard({ onClose, onComplete }) {
       }
 
       // 1. 使用生成的人格数据创建用户Agent
-      const userId = `user_${Date.now()}`;
-      const role_code = `digital_twin_${userId}`;
+      // 统一使用 digital_twin_user_{user_id}_{timestamp} 格式
+      const timestamp = Date.now();
+      let userId = '';
+      try {
+        const userResult = await api.getCurrentUser();
+        if (userResult.success && userResult.user) {
+          userId = userResult.user.user_id;
+        }
+      } catch (error) {
+        console.warn('Failed to get user ID:', error);
+      }
+      // 如果没有user_id，使用时间戳作为临时ID
+      if (!userId) {
+        userId = `user_${timestamp}`;
+      }
+      const role_code = `digital_twin_user_${userId}_${timestamp}`;
 
       // 构建Agent信息 - 符合UI组件期望的格式
       const agentInfo = {

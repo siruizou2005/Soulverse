@@ -1,17 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { ChevronDown, Sparkles, Rocket, Brain, Heart, Zap } from 'lucide-react';
+import { ChevronDown, Sparkles, Rocket, Brain, Heart, Zap, BookOpen } from 'lucide-react';
 import Scene3D from '@/components/Scene3D';
 import WarpEffect from '@/components/WarpEffect';
+import HelpGuide from '@/components/HelpGuide';
 
 export default function Home() {
   const router = useRouter();
   const [scrollProgress, setScrollProgress] = useState(0);
   const [isWarping, setIsWarping] = useState(false);
   const { scrollYProgress } = useScroll();
+  const helpGuideRef = useRef(null);
 
   useEffect(() => {
     let lastValue = 0;
@@ -46,6 +48,9 @@ export default function Home() {
       <div className="fixed inset-0 pointer-events-none z-0 bg-[radial-gradient(circle_at_center,transparent_0%,#000000_130%)]" />
 
       <WarpEffect isActive={isWarping} onComplete={handleWarpComplete} />
+
+      {/* 帮助指南 */}
+      <HelpGuide triggerRef={helpGuideRef} />
 
       <motion.div
         className="relative z-10"
@@ -95,20 +100,33 @@ export default function Home() {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.5, duration: 0.8 }}
           >
-            <motion.button
-              onClick={handleLaunch}
-              className="group relative px-12 py-6 text-2xl font-bold text-white glass rounded-full hover:bg-white/10 transition-all duration-500 overflow-hidden"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <span className="relative z-10">进入平行时空</span>
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-cyan-500/20"
-                animate={{ x: ['-100%', '100%'] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-              />
-              <div className="absolute inset-0 border border-cyan-500/30 rounded-full group-hover:border-cyan-500/60 transition-colors" />
-            </motion.button>
+            <div className="flex flex-col items-center gap-4">
+              <motion.button
+                onClick={handleLaunch}
+                className="group relative px-12 py-6 text-2xl font-bold text-white glass rounded-full hover:bg-white/10 transition-all duration-500 overflow-hidden"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <span className="relative z-10">进入平行时空</span>
+                <motion.div
+                  className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-cyan-500/20"
+                  animate={{ x: ['-100%', '100%'] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                />
+                <div className="absolute inset-0 border border-cyan-500/30 rounded-full group-hover:border-cyan-500/60 transition-colors" />
+              </motion.button>
+              
+              <motion.button
+                onClick={() => helpGuideRef.current?.open()}
+                className="flex items-center gap-2 px-6 py-3 text-sm text-gray-400 hover:text-cyan-400 transition-colors group"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.7 }}
+              >
+                <BookOpen className="w-4 h-4 group-hover:text-cyan-400 transition-colors" />
+                <span>使用指南</span>
+              </motion.button>
+            </div>
           </motion.div>
 
           <motion.div
@@ -254,61 +272,136 @@ export default function Home() {
         </section>
 
         {/* Section 4: Innovation & Tech */}
-        <section className="min-h-screen flex items-center justify-center px-4 py-20">
-          <div className="max-w-5xl mx-auto text-center">
+        <section className="min-h-screen flex items-center justify-center px-4 py-20 relative bg-black/20">
+          <div className="max-w-7xl mx-auto">
             <motion.div
-              className="glass p-12 rounded-3xl border border-white/10 relative overflow-hidden"
-              initial={{ opacity: 0, y: 50 }}
+              className="text-center mb-16"
+              initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
             >
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-cyan-500" />
+              <h2 className="text-5xl font-bold mb-6 text-gradient">技术特色</h2>
+              <p className="text-xl text-gray-400">前沿AI技术与创新架构的完美融合</p>
+            </motion.div>
 
-              <h2 className="text-4xl font-bold mb-12 text-white">技术与创新</h2>
-
-              <div className="grid md:grid-cols-2 gap-12 text-left">
-                <div>
-                  <h3 className="text-2xl font-bold text-cyan-400 mb-4">核心创新点</h3>
-                  <ul className="space-y-4 text-gray-300">
-                    <li className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5" />
-                      <p>从“单聊关系”升级为“世界级互动”多 Agent 社会系统。</p>
-                    </li>
-                    <li className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5" />
-                      <p>完整的 Generative Agents “记忆—反思—规划”范式。</p>
-                    </li>
-                    <li className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5" />
-                      <p>可回溯的“社交证据”，让匹配有迹可循。</p>
-                    </li>
-                  </ul>
+            <div className="grid lg:grid-cols-2 gap-8 mb-12">
+              {/* 核心创新点 */}
+              <motion.div
+                className="glass p-8 rounded-2xl border border-cyan-500/20 hover:border-cyan-500/40 transition-all"
+                initial={{ opacity: 0, x: -50 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.8 }}
+              >
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                    <Sparkles className="w-6 h-6 text-cyan-400" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-cyan-400">核心创新点</h3>
                 </div>
+                <ul className="space-y-4 text-gray-300">
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>从"单聊关系"升级为"世界级互动"多 Agent 社会系统，支持复杂的社会网络模拟。</p>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>完整的 Generative Agents "记忆—反思—规划"范式，每个Agent都有独立的认知系统。</p>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>可回溯的"社交证据"，基于真实互动数据而非静态标签进行智能匹配。</p>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>多用户实时协作系统，支持多人同时参与同一对话场景，智能调度确保流畅体验。</p>
+                  </li>
+                </ul>
+              </motion.div>
 
-                <div>
-                  <h3 className="text-2xl font-bold text-purple-400 mb-4">技术架构</h3>
-                  <ul className="space-y-4 text-gray-300">
-                    <li className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5" />
-                      <p>基于 <span className="text-white font-bold">ScrollWeaver</span> 多智能体引擎。</p>
-                    </li>
-                    <li className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5" />
-                      <p>RAG 向量检索 + 长期记忆存储 (ChromaDB)。</p>
-                    </li>
-                    <li className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5" />
-                      <p>灵活的大模型适配 (OpenAI, Gemini, DeepSeek)。</p>
-                    </li>
-                  </ul>
+              {/* 技术架构 */}
+              <motion.div
+                className="glass p-8 rounded-2xl border border-purple-500/20 hover:border-purple-500/40 transition-all"
+                initial={{ opacity: 0, x: 50 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.8 }}
+              >
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                    <Brain className="w-6 h-6 text-purple-400" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-purple-400">技术架构</h3>
                 </div>
-              </div>
+                <ul className="space-y-4 text-gray-300">
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>基于 <span className="text-white font-bold">ScrollWeaver</span> 多智能体引擎，支持大规模Agent并发模拟。</p>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>RAG 向量检索 + ChromaDB 长期记忆存储，实现Agent的持久化记忆和情境感知。</p>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>灵活的大模型适配层，支持 OpenAI GPT、Google Gemini、DeepSeek 等多种LLM。</p>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 bg-purple-400 rounded-full mt-2.5 flex-shrink-0" />
+                    <p>实时 WebSocket 通信架构，确保多用户场景下的低延迟同步体验。</p>
+                  </li>
+                </ul>
+              </motion.div>
+            </div>
 
-              <div className="mt-12 pt-8 border-t border-white/10">
-                <p className="text-gray-400 text-sm">
-                  * 本项目聚焦于“灵魂创新”赛道，旨在为 Soul App 孵化下一代社交范式。
-                </p>
-              </div>
+            {/* 技术亮点卡片 */}
+            <div className="grid md:grid-cols-3 gap-6">
+              <motion.div
+                className="glass p-6 rounded-xl border border-white/5 hover:border-cyan-500/30 transition-all"
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.1 }}
+              >
+                <div className="text-3xl mb-3">🧠</div>
+                <h4 className="text-lg font-bold text-white mb-2">智能记忆系统</h4>
+                <p className="text-sm text-gray-400">每个Agent都有独立的记忆库，能够回忆过往互动，形成连贯的人格表现。</p>
+              </motion.div>
+
+              <motion.div
+                className="glass p-6 rounded-xl border border-white/5 hover:border-purple-500/30 transition-all"
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.2 }}
+              >
+                <div className="text-3xl mb-3">🌐</div>
+                <h4 className="text-lg font-bold text-white mb-2">多用户协作</h4>
+                <p className="text-sm text-gray-400">支持多人同时参与，实时同步对话状态，智能调度确保每个用户都能参与互动。</p>
+              </motion.div>
+
+              <motion.div
+                className="glass p-6 rounded-xl border border-white/5 hover:border-cyan-500/30 transition-all"
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.3 }}
+              >
+                <div className="text-3xl mb-3">⚡</div>
+                <h4 className="text-lg font-bold text-white mb-2">实时响应</h4>
+                <p className="text-sm text-gray-400">基于WebSocket的实时通信，毫秒级消息同步，流畅的交互体验。</p>
+              </motion.div>
+            </div>
+
+            <motion.div
+              className="mt-12 text-center"
+              initial={{ opacity: 0 }}
+              whileInView={{ opacity: 1 }}
+              viewport={{ once: true }}
+            >
+              <p className="text-gray-400 text-sm">
+                * 本项目聚焦于"灵魂创新"赛道，旨在为 Soul App 孵化下一代社交范式。
+              </p>
             </motion.div>
           </div>
         </section>
@@ -321,14 +414,23 @@ export default function Home() {
             viewport={{ once: true }}
           >
             <h2 className="text-5xl font-bold mb-8 text-gradient">准备好开启你的平行人生了吗？</h2>
-            <motion.button
-              onClick={handleLaunch}
-              className="px-16 py-6 text-2xl font-bold text-black bg-white rounded-full hover:bg-cyan-50 transition-colors shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:shadow-[0_0_50px_rgba(34,211,238,0.5)]"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              立即启动 Soulverse
-            </motion.button>
+            <div className="flex flex-col items-center gap-4">
+              <motion.button
+                onClick={handleLaunch}
+                className="px-16 py-6 text-2xl font-bold text-black bg-white rounded-full hover:bg-cyan-50 transition-colors shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:shadow-[0_0_50px_rgba(34,211,238,0.5)]"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                立即启动 Soulverse
+              </motion.button>
+              <motion.button
+                onClick={() => helpGuideRef.current?.open()}
+                className="flex items-center gap-2 px-6 py-3 text-sm text-gray-400 hover:text-cyan-400 transition-colors group"
+              >
+                <BookOpen className="w-4 h-4 group-hover:text-cyan-400 transition-colors" />
+                <span>查看使用指南</span>
+              </motion.button>
+            </div>
           </motion.div>
         </section>
       </motion.div>

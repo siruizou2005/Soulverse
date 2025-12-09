@@ -161,8 +161,9 @@ export const api = {
   },
 
   // 恢复用户 agent 到沙盒（从已保存的数字孪生数据）
-  async restoreUserAgent(roleCode, roomId = null) {
-    const body = { role_code: roleCode };
+  async restoreUserAgent(roomId = null) {
+    // role_code现在从服务器端的用户数字孪生数据中获取，无需传递
+    const body = {};
     if (roomId) body.room_id = roomId;
 
     const response = await fetch(`${API_BASE}/restore-user-agent`, {
@@ -186,6 +187,25 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
+    });
+    return response.json();
+  },
+
+  // 检查房间是否存在
+  async checkRoomExists(roomId) {
+    const response = await fetch(`${API_BASE}/room-exists?room_id=${roomId}`, {
+      credentials: 'include'
+    });
+    return response.json();
+  },
+
+  // 获取房间中的agents列表
+  async getCharacters(roomId = null) {
+    const url = roomId 
+      ? `${API_BASE}/characters?room_id=${roomId}`
+      : `${API_BASE}/characters`;
+    const response = await fetch(url, {
+      credentials: 'include'
     });
     return response.json();
   },

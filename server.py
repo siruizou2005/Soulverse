@@ -163,8 +163,9 @@ async def load_preset(request: Request):
 async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str):
     room = room_manager.get_room(room_id)
     if not room:
-         # Auto-create for now to be friendly
-         room = room_manager.create_room(room_id)
+         # 房间不存在，拒绝连接
+         await websocket.close(code=1008, reason="Room does not exist")
+         return
     
     # Try to extract user_id from session
     user_id = None
@@ -210,32 +211,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                 if client_id in room.pending_user_inputs and not room.pending_user_inputs[client_id].done():
                     room.pending_user_inputs[client_id].set_result(text)
                 else:
-                    # Check possession mode
+                    # Check possession mode and verify permissions
                     role_code = room.user_selected_roles.get(client_id)
                     if role_code:
-                         await room.handle_user_role_input(client_id, role_code, text)
+                        # 权限验证：确保用户只能控制自己的数字孪生
+                        if not role_code.startswith('digital_twin_user_'):
+                            await websocket.send_json({
+                                'type': 'error',
+                                'data': {'message': '只能控制自己的数字孪生'}
+                            })
+                        else:
+                            # 权限验证通过，处理用户输入
+                            await room.handle_user_role_input(client_id, role_code, text)
+                    else:
+                        await websocket.send_json({
+                            'type': 'error',
+                            'data': {'message': '未绑定数字孪生，无法发送消息'}
+                        })
                          
-            elif msg_type == 'role_selected':
-                role_code = data.get('role_code')
-                # Check for conflicts: role already selected by another client
-                existing_owner = None
-                for cid, rc in room.user_selected_roles.items():
-                    if rc == role_code and cid != client_id:
-                        existing_owner = cid
-                        break
-
-                if existing_owner:
-                    # notify client about conflict
-                    await websocket.send_json({
-                        'type': 'role_selection_failed',
-                        'data': {'role_code': role_code, 'reason': 'already_selected'}
-                    })
-                else:
-                    old_role = room.user_selected_roles.get(client_id)
-                    room.user_selected_roles[client_id] = role_code
-                    print(f"Client {client_id} selected role {role_code}")
-                    # Broadcast full selection map to room (clients can refresh UI)
-                    await room.broadcast_json({'type': 'role_selection_map', 'data': room.user_selected_roles})
+            # role_selected消息处理已移除 - 用户数字孪生自动绑定
                 
             elif msg_type == 'possession_mode' or msg_type == 'set_possession_mode':
                 enabled = data.get('enabled', False)
@@ -268,10 +262,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                     # best-effort only
                     room.scrollweaver.server._possession_mode = not bool(enabled)
                 
-            elif msg_type == 'clear_role':
-                if client_id in room.user_selected_roles:
-                    del room.user_selected_roles[client_id]
-                    await room.broadcast_json({'type': 'role_selection_map', 'data': room.user_selected_roles})
+            # clear_role消息处理已移除 - 用户数字孪生自动绑定，无法手动清除
                     
             elif msg_type == 'control_command':
                 cmd = data.get('command')
@@ -1227,11 +1218,7 @@ async def restore_user_agent(request: Request):
             raise HTTPException(status_code=401, detail="未登录")
         
         data = await request.json()
-        role_code = data.get('role_code')
         room_id = data.get('room_id')
-        
-        if not role_code:
-            raise HTTPException(status_code=400, detail="role_code is required")
         
         if room_id:
             room = room_manager.get_room(room_id)
@@ -1239,6 +1226,25 @@ async def restore_user_agent(request: Request):
                  room = room_manager.create_room(room_id)
         else:
              room = room_manager.get_or_create_default_room()
+
+        # 获取用户的数字孪生数据
+        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
+        if not os.path.exists(user_file):
+            raise HTTPException(status_code=404, detail="用户数据不存在")
+        
+        user_data = load_json_file(user_file)
+        digital_twin = user_data.get('digital_twin')
+        if not digital_twin:
+            raise HTTPException(status_code=404, detail="数字孪生数据不存在")
+        
+        # 从数字孪生数据中获取role_code
+        role_code = digital_twin.get('role_code')
+        if not role_code:
+            raise HTTPException(status_code=400, detail="数字孪生数据中缺少role_code")
+        
+        # 验证role_code格式
+        if not role_code.startswith('digital_twin_user_'):
+            raise HTTPException(status_code=400, detail=f"无效的role_code格式: {role_code}")
 
         # 检查 agent 是否已存在
         if role_code in room.scrollweaver.server.role_codes:
@@ -1257,16 +1263,7 @@ async def restore_user_agent(request: Request):
                 }
             }
         
-        # 获取用户的数字孪生数据
-        user_file = os.path.join(USERS_DIR, f"{user_id}.json")
-        if not os.path.exists(user_file):
-            raise HTTPException(status_code=404, detail="用户数据不存在")
-        
-        user_data = load_json_file(user_file)
-        digital_twin = user_data.get('digital_twin')
-        if not digital_twin:
-            raise HTTPException(status_code=404, detail="数字孪生数据不存在")
-        
+        # 数字孪生数据已在上面获取
         soul_profile = digital_twin.get('extracted_profile', {})
         
         core_traits = None
@@ -1299,8 +1296,7 @@ async def restore_user_agent(request: Request):
         # 记录用户 Agent 映射
         room.user_agents[user_id] = role_code
         
-        # 重置生成器初始化标志
-        room.generator_initialized = False
+        # 注意：不需要重置generator_initialized，新agent会在下一个轮次自然参与
         
         print(f"用户Agent已恢复到沙盒: {user_agent.nickname} ({role_code})")
         
@@ -1325,9 +1321,62 @@ async def restore_user_agent(request: Request):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/room-exists")
+async def check_room_exists(room_id: str):
+    """检查房间是否存在"""
+    try:
+        if not room_id:
+            return {"success": False, "exists": False, "message": "房间ID不能为空"}
+        
+        room = room_manager.get_room(room_id)
+        exists = room is not None
+        
+        if exists:
+            # 检查房间中是否有agents（判断是否为空房间）
+            characters_info = room.scrollweaver.get_characters_info()
+            has_agents = len(characters_info) > 0
+            return {
+                "success": True,
+                "exists": True,
+                "has_agents": has_agents,
+                "characters_count": len(characters_info)
+            }
+        else:
+            return {
+                "success": True,
+                "exists": False,
+                "has_agents": False,
+                "characters_count": 0
+            }
+    except Exception as e:
+        print(f"Error checking room existence: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "exists": False, "message": str(e)}
+
+@app.get("/api/characters")
+async def get_characters(request: Request, room_id: str = None):
+    """获取房间中的agents列表"""
+    try:
+        if room_id:
+            room = room_manager.get_room(room_id)
+        if not room_id or not room:
+             room = room_manager.get_or_create_default_room()
+        
+        characters_info = room.scrollweaver.get_characters_info()
+        return {"success": True, "characters": characters_info}
+    except Exception as e:
+        print(f"Error getting characters: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/clear-preset-agents")
 async def clear_preset_agents(request: Request):
-    """清空沙盒中的所有预设agents（保留用户agent）"""
+    """清空沙盒中的所有预设agents（保留用户agent）
+    
+    注意：只有在房间为空（没有其他用户的agents）时才应该调用此API
+    """
     try:
         user_id = get_user_id_from_session(request)
         if not user_id:
@@ -1341,14 +1390,27 @@ async def clear_preset_agents(request: Request):
         if not room_id or not room:
              room = room_manager.get_or_create_default_room()
         
-        # 获取当前沙盒中的所有agents
+        # 检查房间中是否有其他用户的agents
         role_codes = list(room.scrollweaver.server.role_codes)
+        other_users_agents = [rc for rc in role_codes if rc.startswith('digital_twin_user_')]
+        
+        # 如果房间中有其他用户的agents，不应该清空（多用户场景）
+        if len(other_users_agents) > 1:  # 超过1个用户agent，说明有其他用户
+            return {
+                "success": False,
+                "message": "房间中有其他用户的agents，不能清空",
+                "removed_count": 0
+            }
+        
+        # 获取当前沙盒中的所有agents
+        preset_agents_count = 0
         
         # 遍历所有agents，移除预设agents（保留用户agent）
         for role_code in role_codes:
-            # 检查是否是用户agent（user_agent开头 或 digital_twin_user开头）
-            if not role_code.startswith('user_agent_') and not role_code.startswith('digital_twin_user_'):
+            # 检查是否是用户agent（统一使用 digital_twin_user_ 开头）
+            if not role_code.startswith('digital_twin_user_'):
                 # 是预设agent，移除
+                preset_agents_count += 1
                 try:
                     if role_code in room.scrollweaver.server.role_codes:
                         room.scrollweaver.server.role_codes.remove(role_code)
@@ -1357,11 +1419,16 @@ async def clear_preset_agents(request: Request):
                 except Exception as e:
                      print(f"Error removing {role_code}: {e}")
         
-        room.generator_initialized = False
+        # 注意：不需要重置generator_initialized，agent移除会在下一个轮次生效
         
         characters_info = room.scrollweaver.get_characters_info()
 
-        return {"success": True, "message": "已清空所有NPC", "characters": characters_info}
+        return {
+            "success": True,
+            "message": "已清空所有NPC",
+            "removed_count": preset_agents_count,
+            "characters": characters_info
+        }
     except Exception as e:
         print(f"Error clearing preset agents: {e}")
         import traceback
@@ -1417,10 +1484,33 @@ async def add_preset_npc(request: Request):
             'data': {'characters': characters_info}
         })
         
+        # 获取agent实例以获取完整信息
+        agent = room.scrollweaver.server.performers.get(role_code)
+        
+        # 构建完整的agent_info，包含preset数据（用于前端profile显示）
+        agent_info = {
+            "role_code": role_code,
+            "role_name": role_name,
+            "nickname": role_name,
+            "preset": preset,  # 包含完整的预设数据（big_five, values, mbti等）
+            "profile": preset.get("description", ""),
+            "description": preset.get("description", ""),
+            "source": "soulverse_npc"
+        }
+        
+        # 如果agent存在，添加额外信息
+        if agent:
+            if hasattr(agent, 'personality_profile'):
+                # 添加personality_profile数据
+                agent_info["personality_profile"] = agent.personality_profile.to_dict()
+            if hasattr(agent, 'role_profile'):
+                agent_info["profile"] = agent.role_profile or preset.get("description", "")
+        
         return {
             "success": True, 
             "role_code": role_code, 
             "role_name": role_name,
+            "agent_info": agent_info,  # 返回完整的agent_info
             "characters": characters_info
         }
     except HTTPException:

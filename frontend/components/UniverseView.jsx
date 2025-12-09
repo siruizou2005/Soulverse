@@ -21,9 +21,13 @@ export default function UniverseView({ user }) {
   const [targetAgent, setTargetAgent] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [viewingAgent, setViewingAgent] = useState(null); // Track which agent profile to view
+  const [isAddingAgents, setIsAddingAgents] = useState(false); // 正在添加agents到沙盒
 
   const [roomId, setRoomId] = useState(null); // Initialize as null to show selection
   const [roomInput, setRoomInput] = useState('');
+  const [isNewRoom, setIsNewRoom] = useState(false); // 标记是否是新建房间
+  const [roomAgents, setRoomAgents] = useState([]); // 房间中所有agents（包括用户agents和预设agents）
+  const [userAgents, setUserAgents] = useState([]); // 房间中的用户agents（数字孪生）
 
   const initRef = useRef(false); // 防止 StrictMode 重复执行
 
@@ -31,16 +35,41 @@ export default function UniverseView({ user }) {
   useEffect(() => {
     const rid = searchParams.get('room_id');
     if (rid) {
-      setRoomId(rid);
+      // 通过URL参数进入，检查房间是否存在
+      api.checkRoomExists(rid).then(result => {
+        if (result.exists) {
+          setIsNewRoom(false); // 加入已有房间
+        } else {
+          setIsNewRoom(true); // 房间不存在，创建新房间
+        }
+        setRoomId(rid);
+      }).catch(error => {
+        console.error('检查房间失败:', error);
+        setIsNewRoom(true); // 默认作为新建房间
+        setRoomId(rid);
+      });
     }
   }, [searchParams]);
 
   useEffect(() => {
     if (!roomId) return; // Wait for room_id
-    if (initRef.current) return; // 已经初始化过，跳过
-    initRef.current = true;
-
-    checkDigitalTwin();
+    
+    // 重置初始化标志和状态
+    initRef.current = false;
+    setHasDigitalTwin(false);
+    setAgentsAdded(false);
+    setSelectedAgents([]);
+    setRoomAgents([]);
+    setUserAgents([]);
+    
+    // 延迟一点再初始化，确保状态已重置
+    const timer = setTimeout(() => {
+      if (initRef.current) return; // 防止重复初始化
+      initRef.current = true;
+      checkDigitalTwin();
+    }, 100);
+    
+    return () => clearTimeout(timer);
 
     // 初始化 WebSocket 连接（用于接收角色列表更新）
     // Use room-specific WebSocket URL
@@ -67,6 +96,14 @@ export default function UniverseView({ user }) {
       const data = JSON.parse(event.data);
       if (data.type === 'characters_list') {
         console.log('角色列表已更新:', data.data.characters);
+        // 更新房间agents列表
+        if (data.data.characters) {
+          setRoomAgents(data.data.characters);
+          const userAgentsList = data.data.characters.filter(
+            char => char.role_code?.startsWith('digital_twin_user_')
+          );
+          setUserAgents(userAgentsList);
+        }
       }
     };
 
@@ -87,38 +124,55 @@ export default function UniverseView({ user }) {
   const checkDigitalTwin = async () => {
     try {
       console.log('检查数字孪生...');
-
-      // 0. 首先清空沙盒中的所有旧预设agents（无论是否有数字孪生）
-      console.log('清空沙盒中的所有旧agents（包括上次会话的残留）...');
-      try {
-        const clearResult = await api.clearPresetAgents(roomId);
-        if (clearResult.success) {
-          console.log(`✓ 已清空 ${clearResult.removed_count} 个旧agents`);
-        }
-      } catch (clearError) {
-        console.warn('清空旧agents时出错:', clearError);
-      }
+      console.log(`房间模式: ${isNewRoom ? '新建房间' : '加入已有房间'}`);
 
       const result = await api.getDigitalTwin();
       if (result && result.success && result.agent_info) {
         console.log('发现已有数字孪生，role_code:', result.agent_info.role_code);
         setHasDigitalTwin(true);
 
-        console.log('准备恢复用户agent到沙盒...');
-        // 1. 恢复用户 agent 到沙盒
-        try {
-          const restoreResult = await api.restoreUserAgent(result.agent_info.role_code, roomId);
-          if (restoreResult.success) {
-            console.log('✓ 用户agent已恢复到沙盒:', restoreResult.agent_info.nickname);
-          } else {
-            console.warn('用户agent恢复失败（可能已存在）:', restoreResult.message);
-          }
-        } catch (error) {
-          console.error('恢复用户agent时出错:', error);
-        }
+        // 注意：用户agent不再立即恢复，而是在点击"开始对话"时恢复
 
-        // 2. 加载匹配结果并添加预设agents（loadMatches内部也会再次清空，确保双重保险）
-        await loadMatches();
+        // 只有在新建房间时才加载匹配结果（但不添加到沙盒）
+        if (isNewRoom) {
+          console.log('新建房间模式：加载匹配结果并添加预设agents');
+          // 清空沙盒中的旧预设agents（新建房间时）
+          try {
+            const clearResult = await api.clearPresetAgents(roomId);
+            if (clearResult.success) {
+              console.log(`✓ 已清空 ${clearResult.removed_count || 0} 个旧预设agents`);
+            }
+          } catch (clearError) {
+            console.warn('清空旧预设agents时出错:', clearError);
+          }
+          await loadMatches();
+        } else {
+          console.log('加入已有房间模式：不加载匹配agents，匹配列表将保持为空且禁用');
+          // 加入已有房间时，获取房间中现有的agents信息
+          try {
+            const charactersResult = await api.getCharacters(roomId);
+            if (charactersResult && charactersResult.characters) {
+              // 提取预设agents（非用户数字孪生）
+              const presetAgents = charactersResult.characters.filter(
+                char => !char.role_code?.startsWith('digital_twin_user_')
+              );
+              // 提取用户agents（数字孪生）
+              const userAgentsList = charactersResult.characters.filter(
+                char => char.role_code?.startsWith('digital_twin_user_')
+              );
+              
+              setRoomAgents(charactersResult.characters);
+              setUserAgents(userAgentsList);
+              setSelectedAgents([]); // 匹配列表保持为空，不显示匹配结果
+              setAgentsAdded(false); // 用户agent还未加入
+              console.log(`✓ 加入已有房间模式：房间中有 ${presetAgents.length} 个预设agents，${userAgentsList.length} 个用户agents`);
+            }
+          } catch (error) {
+            console.error('获取房间agents列表失败:', error);
+            setRoomAgents([]);
+            setUserAgents([]);
+          }
+        }
       } else {
         console.log('未发现数字孪生');
         setHasDigitalTwin(false);
@@ -135,15 +189,43 @@ export default function UniverseView({ user }) {
     try {
       setIsConnecting(true); // Start connection status
 
-      // 在匹配之前，先清空沙盒中的预设agents（保留用户agent）
-      console.log('清空沙盒中的旧预设agents...');
+      // 检查房间中是否已有agents（其他用户可能已经添加了）
+      // 只有在房间为空时才清空预设agents
+      console.log('检查房间状态...');
+      let shouldClearAgents = false;
       try {
-        const clearResult = await api.clearPresetAgents(roomId);
-        if (clearResult.success) {
-          console.log(`✓ 已清空 ${clearResult.removed_count} 个旧预设agents`);
+        // 获取当前房间的agents列表
+        const charactersResult = await api.getCharacters(roomId);
+        if (charactersResult && charactersResult.characters) {
+          const existingAgents = charactersResult.characters.filter(
+            char => !char.role_code?.startsWith('digital_twin_user_')
+          );
+          if (existingAgents.length === 0) {
+            // 房间为空，可以清空
+            shouldClearAgents = true;
+            console.log('房间为空，将清空旧预设agents');
+          } else {
+            // 房间中已有其他用户的agents，不清空
+            console.log(`房间中已有 ${existingAgents.length} 个预设agents，保留它们`);
+          }
+        } else {
+          // 无法获取列表，保守处理：不清空
+          console.warn('无法获取房间agents列表，不清空agents');
         }
-      } catch (clearError) {
-        console.warn('清空旧预设agents时出错（可能是首次加载）:', clearError);
+      } catch (error) {
+        console.warn('检查房间状态时出错，不清空agents:', error);
+      }
+
+      // 只有在房间为空时才清空预设agents
+      if (shouldClearAgents) {
+        try {
+          const clearResult = await api.clearPresetAgents(roomId);
+          if (clearResult.success) {
+            console.log(`✓ 已清空 ${clearResult.removed_count || 0} 个旧预设agents`);
+          }
+        } catch (clearError) {
+          console.warn('清空旧预设agents时出错:', clearError);
+        }
       }
 
       // 重置agentsAdded标志，允许重新添加
@@ -181,10 +263,9 @@ export default function UniverseView({ user }) {
         const allAgents = formattedAgents.slice(0, 5);
 
         setSelectedAgents(allAgents);
-
-        // 自动将这些agents添加到沙盒
-        await addMatchedAgentsToSandbox(allAgents);
-        setAgentsAdded(true);
+        // 注意：不立即添加到沙盒，只显示匹配结果供用户选择
+        setAgentsAdded(false); // 标记为未添加到沙盒
+        console.log('✓ 匹配结果已加载，等待用户点击"开始对话"时添加agents');
       }
     } catch (error) {
       console.error('加载匹配结果失败:', error);
@@ -195,11 +276,73 @@ export default function UniverseView({ user }) {
 
 
   const addMatchedAgentsToSandbox = async (agents) => {
+    // 首先获取房间中现有的agents列表，检查哪些preset_id已存在
+    let existingPresetIds = new Set();
+    try {
+      const charactersResult = await api.getCharacters(roomId);
+      if (charactersResult && charactersResult.characters) {
+        // 提取所有预设agents的preset_id（通过role_code前缀匹配preset_id）
+        charactersResult.characters.forEach(char => {
+          if (char.role_code && !char.role_code.startsWith('digital_twin_user_')) {
+            // role_code格式: preset_XXX_YYYYYY，提取preset_id部分
+            const parts = char.role_code.split('_');
+            if (parts.length >= 2) {
+              const presetId = `${parts[0]}_${parts[1]}`;
+              existingPresetIds.add(presetId);
+            }
+          }
+        });
+        console.log(`房间中已存在的preset_ids:`, Array.from(existingPresetIds));
+      }
+    } catch (error) {
+      console.warn('获取现有agents列表失败，将尝试添加所有agents:', error);
+    }
+
     // 遍历添加预设agent到沙盒，并更新role_code和完整的agent_info
     const updatedAgents = [];
     for (const agent of agents) {
       try {
         if (agent.preset_id) {
+          // 检查是否已存在相同preset_id的agent
+          if (existingPresetIds.has(agent.preset_id)) {
+            console.log(`Agent ${agent.name} (preset_id: ${agent.preset_id}) 已存在，跳过添加`);
+            // 尝试从现有agents中找到对应的role_code
+            try {
+              const charactersResult = await api.getCharacters(roomId);
+              if (charactersResult && charactersResult.characters) {
+                const existingAgent = charactersResult.characters.find(char => {
+                  if (char.role_code && !char.role_code.startsWith('digital_twin_user_')) {
+                    const parts = char.role_code.split('_');
+                    if (parts.length >= 2) {
+                      return `${parts[0]}_${parts[1]}` === agent.preset_id;
+                    }
+                  }
+                  return false;
+                });
+                if (existingAgent) {
+                  updatedAgents.push({
+                    ...agent,
+                    role_code: existingAgent.role_code,
+                    disabled: agent.disabled || false,
+                    fullAgentInfo: {
+                      ...existingAgent,
+                      match: agent.match,
+                      match_breakdown: agent.match_breakdown
+                    }
+                  });
+                  console.log(`✓ 使用已存在的agent ${agent.name} (role_code: ${existingAgent.role_code})`);
+                  continue;
+                }
+              }
+            } catch (e) {
+              console.warn(`查找已存在的agent失败:`, e);
+            }
+            // 如果找不到，仍然添加到列表（但不会重复添加）
+            updatedAgents.push(agent);
+            continue;
+          }
+
+          // 添加新的agent
           const result = await api.addPresetNPC(agent.preset_id, agent.name, roomId);
           if (result.success && result.agent_info) {
             // 保存完整的agent_info，同时保留匹配度信息
@@ -246,17 +389,100 @@ export default function UniverseView({ user }) {
     await loadMatches();
   };
 
-  const handleStartChat = () => {
+  const handleStartChat = async () => {
     console.log('handleStartChat called');
-    console.log('selectedAgents:', selectedAgents);
-    console.log('selectedAgents.length:', selectedAgents.length);
-    if (selectedAgents.length > 0) {
-      console.log('✓ Starting chat...');
+    console.log('房间模式:', isNewRoom ? '新建房间' : '加入已有房间');
+    
+    setIsAddingAgents(true);
+    
+    try {
+      if (isNewRoom) {
+        // 新建房间：添加用户agent + 选中的匹配agents
+        console.log('新建房间模式：添加用户agent和选中的匹配agents');
+        
+        // 1. 先恢复用户agent到沙盒
+        console.log('恢复用户agent到沙盒...');
+        try {
+          const restoreResult = await api.restoreUserAgent(roomId);
+          if (restoreResult.success) {
+            console.log('✓ 用户agent已恢复到沙盒:', restoreResult.agent_info.nickname);
+          } else {
+            console.warn('用户agent恢复失败（可能已存在）:', restoreResult.message);
+          }
+        } catch (error) {
+          console.error('恢复用户agent时出错:', error);
+          alert('恢复用户agent失败: ' + error.message);
+          setIsAddingAgents(false);
+          return;
+        }
+        
+        // 2. 添加选中的匹配agents（只添加未禁用的）
+        const agentsToAdd = selectedAgents.filter(a => !a.disabled);
+        if (agentsToAdd.length > 0) {
+          console.log(`添加 ${agentsToAdd.length} 个选中的匹配agents到沙盒...`);
+          await addMatchedAgentsToSandbox(agentsToAdd);
+          setAgentsAdded(true);
+        } else {
+          console.warn('没有选中的agents，无法开始对话');
+          alert('请至少选择一个agent');
+          setIsAddingAgents(false);
+          return;
+        }
+      } else {
+        // 加入已有房间：只添加用户agent，使用房间中已有的agents
+        console.log('加入已有房间模式：只添加用户agent');
+        
+        // 检查房间中是否有预设agents
+        const presetAgents = roomAgents.filter(
+          a => !a.role_code?.startsWith('digital_twin_user_')
+        );
+        if (presetAgents.length === 0) {
+          alert('房间中没有agents，无法开始对话');
+          setIsAddingAgents(false);
+          return;
+        }
+        
+        // 恢复用户agent到沙盒
+        console.log('恢复用户agent到沙盒...');
+        try {
+          const restoreResult = await api.restoreUserAgent(roomId);
+          if (restoreResult.success) {
+            console.log('✓ 用户agent已恢复到沙盒:', restoreResult.agent_info.nickname);
+          } else {
+            console.warn('用户agent恢复失败（可能已存在）:', restoreResult.message);
+          }
+        } catch (error) {
+          console.error('恢复用户agent时出错:', error);
+          alert('恢复用户agent失败: ' + error.message);
+          setIsAddingAgents(false);
+          return;
+        }
+      }
+      
+      // 3. 更新房间agents列表
+      try {
+        const charactersResult = await api.getCharacters(roomId);
+        if (charactersResult && charactersResult.characters) {
+          setRoomAgents(charactersResult.characters);
+          const userAgentsList = charactersResult.characters.filter(
+            char => char.role_code?.startsWith('digital_twin_user_')
+          );
+          setUserAgents(userAgentsList);
+        }
+      } catch (error) {
+        console.error('更新房间agents列表失败:', error);
+      }
+      
+      // 4. 开始对话
+      console.log('✓ 所有agents已添加，开始对话...');
       setChatStarted(true);
       setIs1on1(false);
       setTargetAgent(null);
-    } else {
-      console.log('✗ Cannot start chat: no selected agents');
+    } catch (error) {
+      console.error('开始对话时出错:', error);
+      alert('开始对话失败: ' + error.message);
+    } finally {
+      setIsAddingAgents(false);
     }
   };
 
@@ -343,18 +569,86 @@ export default function UniverseView({ user }) {
     }
   };
 
-  const handleViewProfile = (agent) => {
+  const handleViewProfile = async (agent) => {
     console.log('Viewing agent profile:', agent);
 
     // Try to find if this agent is already loaded in the sandbox with full info
     // Match by role_code or preset_id (agent.id from neural match is the preset_id)
     const loadedAgent = selectedAgents.find(a =>
       (a.role_code && agent.role_code && a.role_code === agent.role_code) ||
-      (a.preset_id && agent.id && a.preset_id === agent.id)
+      (a.preset_id && agent.id && a.preset_id === agent.id) ||
+      (a.code && agent.code && a.code === agent.code) ||
+      (a.role_code && agent.code && a.role_code === agent.code)
     );
 
-    // Use fullAgentInfo if available, otherwise use basic agent data
-    setViewingAgent(loadedAgent?.fullAgentInfo || agent);
+    // If found in selectedAgents, use fullAgentInfo
+    if (loadedAgent?.fullAgentInfo) {
+      setViewingAgent(loadedAgent.fullAgentInfo);
+      return;
+    }
+
+    // Also check roomAgents for NPC agents in the room
+    if (!loadedAgent) {
+      const roomAgent = roomAgents.find(a =>
+        (a.code && agent.code && a.code === agent.code) ||
+        (a.role_code && agent.code && a.role_code === agent.code) ||
+        (a.code && agent.role_code && a.code === agent.role_code)
+      );
+      if (roomAgent) {
+        // Extract preset_id from role_code (format: preset_XXX_YYYYYY)
+        const roleCode = roomAgent.code || roomAgent.role_code;
+        if (roleCode && roleCode.startsWith('preset_')) {
+          const parts = roleCode.split('_');
+          if (parts.length >= 2) {
+            const presetId = `${parts[0]}_${parts[1]}`;
+            try {
+              // Construct agent info similar to matched agents format
+              // get_characters_info returns: mbti, interests, personality, traits, social_goals
+              // We need to map this to the format expected by UserAgentStatus
+              const agentInfo = {
+                ...roomAgent,
+                role_code: roleCode,
+                nickname: roomAgent.name || roomAgent.nickname,
+                role_name: roomAgent.name || roomAgent.role_name,
+                description: roomAgent.description || roomAgent.goal,
+                profile: roomAgent.description || roomAgent.goal,
+                // Map to preset format (same as matched agents)
+                preset: {
+                  mbti: roomAgent.mbti,
+                  big_five: roomAgent.personality?.big_five || (roomAgent.personality && typeof roomAgent.personality === 'object' ? roomAgent.personality.big_five : null),
+                  values: roomAgent.interests || [],
+                  defense_mechanism: roomAgent.personality?.defense_mechanism || null
+                },
+                // Also provide personality at root level for compatibility
+                personality: roomAgent.personality || {
+                  mbti: roomAgent.mbti,
+                  big_five: null,
+                  values: roomAgent.interests || [],
+                  defense_mechanism: null
+                }
+              };
+              setViewingAgent(agentInfo);
+              return;
+            } catch (error) {
+              console.error('Error processing room agent profile:', error);
+            }
+          }
+        }
+        // Fallback: use basic roomAgent data
+        setViewingAgent({
+          ...roomAgent,
+          role_code: roomAgent.code || roomAgent.role_code,
+          nickname: roomAgent.name || roomAgent.nickname,
+          role_name: roomAgent.name || roomAgent.role_name,
+          description: roomAgent.description || roomAgent.goal,
+          profile: roomAgent.description || roomAgent.goal
+        });
+        return;
+      }
+    }
+
+    // Use basic agent data as fallback
+    setViewingAgent(agent);
   };
 
   /* Room Selection UI */
@@ -375,8 +669,9 @@ export default function UniverseView({ user }) {
 
           <div className="space-y-6">
             <button
-              onClick={() => {
+              onClick={async () => {
                 const newId = Math.random().toString(36).substring(2, 8);
+                setIsNewRoom(true); // 标记为新建房间
                 setRoomId(newId);
               }}
               className="w-full py-4 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 rounded-xl font-bold text-lg shadow-lg shadow-cyan-500/20 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2"
@@ -406,8 +701,22 @@ export default function UniverseView({ user }) {
                 />
               </div>
               <button
-                onClick={() => {
-                  if (roomInput.trim()) setRoomId(roomInput.trim());
+                onClick={async () => {
+                  if (!roomInput.trim()) return;
+                  
+                  // 检查房间是否存在
+                  try {
+                    const checkResult = await api.checkRoomExists(roomInput.trim());
+                    if (!checkResult.exists) {
+                      alert('房间不存在，请检查房间号是否正确');
+                      return;
+                    }
+                    setIsNewRoom(false); // 标记为加入房间
+                    setRoomId(roomInput.trim());
+                  } catch (error) {
+                    console.error('检查房间失败:', error);
+                    alert('检查房间失败: ' + error.message);
+                  }
                 }}
                 disabled={!roomInput.trim()}
                 className="w-full py-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed border border-white/10 rounded-xl font-medium text-slate-300 transition-all flex items-center justify-center gap-2"
@@ -473,6 +782,17 @@ export default function UniverseView({ user }) {
           onLogout={handleLogout}
           isPrivateChat={is1on1}
           roomId={roomId}
+          roomAgents={roomAgents}
+          userAgents={userAgents}
+          onViewProfile={handleViewProfile}
+          canControlPlayback={isNewRoom}
+          onUpdateAgents={(agents) => {
+            setRoomAgents(agents);
+            const userAgentsList = agents.filter(
+              char => char.role_code?.startsWith('digital_twin_user_') || char.code?.startsWith('digital_twin_user_')
+            );
+            setUserAgents(userAgentsList);
+          }}
         />
         {showUserStatus && (
           <UserAgentStatus
@@ -497,12 +817,15 @@ export default function UniverseView({ user }) {
 
       {/* 左侧边栏：匹配系统 */}
       <NeuralMatching
-        matchedTwins={selectedAgents.slice(0, 3)}
-        randomTwins={selectedAgents.slice(3)}
-        onToggleAgent={handleToggleAgent}
-        onStartChat={handleStart1on1Chat}
+        matchedTwins={isNewRoom ? selectedAgents.slice(0, 3) : []}
+        randomTwins={isNewRoom ? selectedAgents.slice(3) : []}
+        onToggleAgent={isNewRoom ? handleToggleAgent : undefined}
+        onStartChat={isNewRoom ? handleStart1on1Chat : undefined}
         onViewProfile={handleViewProfile}
         chatStarted={chatStarted}
+        isDisabled={!isNewRoom} // 加入已有房间时禁用
+        userAgents={userAgents} // 传递用户agents列表
+        roomAgents={roomAgents} // 传递房间中所有agents列表
       />
 
       {/* 中央视图：宇宙 */}
@@ -517,7 +840,16 @@ export default function UniverseView({ user }) {
               {roomId}
             </span>
             <span className="text-slate-700">|</span>
-            <span>NODES: {selectedAgents.filter(a => !a.disabled).length}</span>
+            <span>NODES: {isNewRoom ? selectedAgents.filter(a => !a.disabled).length : roomAgents.filter(a => !a.role_code?.startsWith('digital_twin_user_')).length}</span>
+            {userAgents.length > 0 && (
+              <>
+                <span className="text-slate-700">|</span>
+                <span className="text-purple-400 flex items-center gap-1" title={`房间中的用户: ${userAgents.map(a => a.nickname || a.role_name).join(', ')}`}>
+                  <User className="w-3 h-3" />
+                  USERS: {userAgents.length}
+                </span>
+              </>
+            )}
           </div>
           <div className="flex gap-4">
             <button
@@ -553,18 +885,26 @@ export default function UniverseView({ user }) {
               </p>
               <h1 className="text-4xl font-bold text-white mb-2 tracking-tighter">
                 {isConnecting ? '连接中...' : (
-                  selectedAgents.length > 1
-                    ? '已连接'
-                    : (selectedAgents.length > 0 ? selectedAgents[0].name : '等待匹配')
+                  isNewRoom ? (
+                    selectedAgents.length > 1
+                      ? '已连接'
+                      : (selectedAgents.length > 0 ? selectedAgents[0].name : '等待匹配')
+                  ) : (
+                    roomAgents.length > 0 
+                      ? `已加入房间 (${roomAgents.filter(a => !a.role_code?.startsWith('digital_twin_user_')).length} agents)`
+                      : '已加入房间'
+                  )
                 )}
               </h1>
               <button
                 onClick={handleStartChat}
-                disabled={isConnecting || selectedAgents.filter(a => !a.disabled).length === 0}
+                disabled={isConnecting || isAddingAgents || (isNewRoom ? selectedAgents.filter(a => !a.disabled).length === 0 : roomAgents.filter(a => !a.role_code?.startsWith('digital_twin_user_')).length === 0)}
                 className="mt-4 px-6 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-sm backdrop-blur-md transition-all flex items-center gap-2 mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isConnecting ? (
                   <><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-loader w-3 h-3 animate-spin"><path d="M12 2v4" /><path d="m16.2 7.8 2.9-2.9" /><path d="M18 12h4" /><path d="m16.2 16.2 2.9 2.9" /><path d="M12 18v4" /><path d="m7.8 16.2-2.9 2.9" /><path d="M6 12H2" /><path d="m7.8 7.8-2.9-2.9" /></svg> 正在连接...</>
+                ) : isAddingAgents ? (
+                  <><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-loader w-3 h-3 animate-spin"><path d="M12 2v4" /><path d="m16.2 7.8 2.9-2.9" /><path d="M18 12h4" /><path d="m16.2 16.2 2.9 2.9" /><path d="M12 18v4" /><path d="m7.8 16.2-2.9 2.9" /><path d="M6 12H2" /><path d="m7.8 7.8-2.9-2.9" /></svg> 正在添加agents...</>
                 ) : (
                   <><Play className="w-3 h-3 fill-current" /> 开始对话</>
                 )}

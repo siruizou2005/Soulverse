@@ -3,7 +3,7 @@ import { Play, Square, User, Bot, UserCircle, FileText, X, Loader, LogOut, Arrow
 import ReactMarkdown from 'react-markdown';
 import { api } from '../services/api';
 
-export default function ChatInterface({ selectedAgents = [], onUserClick, onBackToMatching, onLogout, roomId }) {
+export default function ChatInterface({ selectedAgents = [], onUserClick, onBackToMatching, onLogout, roomId, roomAgents = [], userAgents = [], onViewProfile, onUpdateAgents, canControlPlayback = true }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -37,7 +37,7 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
       console.log('WebSocket connected');
       setWs(websocket);
 
-      // 1. 首先发送用户身份确认
+      // 1. 首先发送用户身份确认，并获取当前用户的role_code
       try {
         const userResult = await fetch('/api/user/me', { credentials: 'include' });
         if (userResult.ok) {
@@ -48,6 +48,20 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
               type: 'identify_user',
               user_id: userData.user.user_id
             }));
+            
+            // 获取当前用户的role_code
+            try {
+              const twinResult = await fetch('/api/user/digital-twin', { credentials: 'include' });
+              if (twinResult.ok) {
+                const twinData = await twinResult.json();
+                if (twinData.success && twinData.agent_info && twinData.agent_info.role_code) {
+                  setUserAgentRoleCode(twinData.agent_info.role_code);
+                  console.log('当前用户role_code:', twinData.agent_info.role_code);
+                }
+              }
+            } catch (error) {
+              console.error('获取数字孪生信息失败:', error);
+            }
           }
         }
       } catch (error) {
@@ -110,7 +124,9 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
         username: data.data.username,
         text: data.data.text,
         timestamp: data.data.timestamp,
-        is_user: data.data.is_user || false
+        is_user: data.data.is_user || false,
+        is_timeout_replacement: data.data.is_timeout_replacement || false,
+        role_code: data.data.role_code || null  // 保存role_code用于区分不同用户
       }]);
 
       // 如果收到用户消息，取消等待状态
@@ -121,12 +137,14 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
     } else if (data.type === 'characters_list') {
       // 处理角色列表更新
       console.log('Characters updated:', data.data.characters);
-    } else if (data.type === 'user_agent_selected') {
-      // 用户 agent 已选择
-      console.log('✓ 用户Agent已选择:', data.data);
-      if (data.data.role_code) {
-        setUserAgentRoleCode(data.data.role_code);
+      // 更新roomAgents和userAgents（如果props中有更新函数）
+      if (data.data.characters && onUpdateAgents) {
+        onUpdateAgents(data.data.characters);
       }
+    } else if (data.type === 'no_digital_twin') {
+      // 用户没有数字孪生，需要创建
+      console.log('⚠️ 用户没有数字孪生:', data.data);
+      alert('请先创建数字孪生');
     } else if (data.type === 'waiting_for_user_input') {
       // 等待用户输入
       console.log('⏳ 等待用户输入:', data.data);
@@ -188,6 +206,17 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
       console.log('✓ AI建议已生成:', data.data);
       setAiSuggestions(data.data.options);
       setLoadingSuggestions(false);
+    } else if (data.type === 'conversation_ended') {
+      // 对话已结束（所有用户退出）
+      console.log('对话已结束:', data.data);
+      setWaitingForInput(false);
+      setWaitingRoleName('');
+      // 可以显示提示信息
+      alert('所有用户已退出，对话已结束');
+    } else if (data.type === 'agent_restore_needed') {
+      // Agent恢复需要
+      console.log('Agent恢复需要:', data.data);
+      alert(data.data.message || 'Agent恢复失败，请重试');
     }
   };
 
@@ -369,7 +398,7 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
         <div className="flex items-center gap-4 text-sm text-slate-400 font-mono">
           <span>SECTOR: ALPHA</span>
           <span className="text-slate-700">|</span>
-          <span>NODES: {selectedAgents.length}</span>
+          <span>NODES: {roomAgents.length > 0 ? roomAgents.length : selectedAgents.length}</span>
         </div>
         <div className="flex gap-2 items-center">
           {/* AI控制模式切换 */}
@@ -394,17 +423,35 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
             )}
           </button>
 
-          <button
-            onClick={handleTogglePlayPause}
-            className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
-            title={isPlaying ? "停止" : "开始"}
-          >
-            {isPlaying ? (
-              <Square className="w-5 h-5" />
-            ) : (
-              <Play className="w-5 h-5" />
-            )}
-          </button>
+          {canControlPlayback ? (
+            <button
+              onClick={handleTogglePlayPause}
+              className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+              title={isPlaying ? "停止" : "开始"}
+            >
+              {isPlaying ? (
+                <Square className="w-5 h-5" />
+              ) : (
+                <Play className="w-5 h-5" />
+              )}
+            </button>
+          ) : (
+            <div 
+              className="p-2 rounded-full flex items-center gap-2"
+              title={isPlaying ? "对话进行中（仅房间创建者可控制）" : "对话已暂停（仅房间创建者可控制）"}
+            >
+              <div className={`relative ${isPlaying ? 'text-green-400' : 'text-slate-500'}`}>
+                {isPlaying ? (
+                  <Square className="w-5 h-5" />
+                ) : (
+                  <Play className="w-5 h-5" />
+                )}
+                <div className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-slate-800 ${
+                  isPlaying ? 'bg-green-400 animate-pulse' : 'bg-slate-500'
+                }`} />
+              </div>
+            </div>
+          )}
           {/* 生成社交报告按钮 */}
           <button
             onClick={handleGenerateReport}
@@ -469,23 +516,63 @@ export default function ChatInterface({ selectedAgents = [], onUserClick, onBack
           </div>
         ) : (
           <div className="space-y-4">
-            {messages.map((msg, index) => (
-              <div
-                key={index}
-                className={`flex ${msg.is_user ? 'justify-end' : 'justify-start'}`}
-              >
-                <div className={`max-w-[75%] rounded-lg p-4 ${msg.is_user
-                  ? 'bg-cyan-500/20 border border-cyan-500/30 text-white'
-                  : 'bg-slate-900/50 border border-slate-800 text-slate-200'
+            {messages.map((msg, index) => {
+              // 判断消息来源
+              const isCurrentUser = msg.role_code && userAgentRoleCode && msg.role_code === userAgentRoleCode;
+              const isOtherUser = msg.role_code && msg.role_code.startsWith('digital_twin_user_') && !isCurrentUser;
+              const isNPC = !msg.role_code || (!msg.role_code.startsWith('digital_twin_user_'));
+              
+              // 根据role_code生成颜色（用于其他用户的消息）
+              const getUserColor = (roleCode) => {
+                if (!roleCode) return { bg: 'bg-slate-900/50', border: 'border-slate-800', text: 'text-slate-200' };
+                // 预定义的颜色数组，用于区分不同用户
+                const colors = [
+                  { bg: 'bg-purple-500/20', border: 'border-purple-500/30', text: 'text-purple-200' },
+                  { bg: 'bg-pink-500/20', border: 'border-pink-500/30', text: 'text-pink-200' },
+                  { bg: 'bg-indigo-500/20', border: 'border-indigo-500/30', text: 'text-indigo-200' },
+                  { bg: 'bg-emerald-500/20', border: 'border-emerald-500/30', text: 'text-emerald-200' },
+                  { bg: 'bg-orange-500/20', border: 'border-orange-500/30', text: 'text-orange-200' },
+                  { bg: 'bg-teal-500/20', border: 'border-teal-500/30', text: 'text-teal-200' },
+                  { bg: 'bg-rose-500/20', border: 'border-rose-500/30', text: 'text-rose-200' },
+                  { bg: 'bg-violet-500/20', border: 'border-violet-500/30', text: 'text-violet-200' },
+                ];
+                // 使用role_code的hash值选择颜色
+                let hash = 0;
+                for (let i = 0; i < roleCode.length; i++) {
+                  hash = roleCode.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                const colorIndex = Math.abs(hash % colors.length);
+                return colors[colorIndex];
+              };
+              
+              const userColor = isOtherUser ? getUserColor(msg.role_code) : null;
+              
+              return (
+                <div
+                  key={index}
+                  className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`max-w-[75%] rounded-lg p-4 ${
+                    isCurrentUser
+                      ? 'bg-cyan-500/20 border border-cyan-500/30 text-white'
+                      : isOtherUser
+                        ? `${userColor.bg} border ${userColor.border} ${userColor.text}`
+                        : 'bg-slate-900/50 border border-slate-800 text-slate-200'
                   }`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-sm">{msg.username}</span>
-                    <span className="text-xs text-slate-500">{msg.timestamp}</span>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-semibold text-sm">{msg.username}</span>
+                      {msg.is_timeout_replacement && (
+                        <span className="text-xs px-1.5 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded">
+                          AI自动回复
+                        </span>
+                      )}
+                      <span className="text-xs text-slate-500">{msg.timestamp}</span>
+                    </div>
+                    <div className="text-sm whitespace-pre-wrap">{msg.text}</div>
                   </div>
-                  <div className="text-sm whitespace-pre-wrap">{msg.text}</div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}
