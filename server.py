@@ -339,17 +339,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str)
                                 # 将选中的选项作为用户输入，并标记为已回显
                                 room.pending_user_inputs[client_id].set_result((selected_text, True))
                                 
-                                # 立即回显消息给前端，确保用户能马上看到自己的回复
+                                # 立即广播消息给所有用户，确保大家都能看到
                                 performer = room.scrollweaver.server.performers.get(user_role_code)
                                 username = performer.nickname if performer and hasattr(performer, 'nickname') and performer.nickname else (performer.role_name if performer and hasattr(performer, 'role_name') else user_role_code)
+                                icon_path = default_icon_path
+                                if performer and hasattr(performer, 'icon_path') and performer.icon_path and os.path.exists(performer.icon_path) and is_image(performer.icon_path):
+                                    icon_path = performer.icon_path
                                 
-                                await websocket.send_json({
+                                # 使用广播而不是单发，确保所有用户都能看到
+                                # 添加 role_code 字段，确保前端能正确判断消息来源
+                                await room.broadcast_json({
                                     'type': 'message',
                                     'data': {
                                         'username': username,
                                         'text': selected_text,
                                         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                        'is_user': True
+                                        'is_user': True,
+                                        'is_timeout_replacement': False,
+                                        'role_code': user_role_code,  # 添加 role_code 用于前端区分
+                                        'icon': icon_path
                                     }
                                 })
                                 

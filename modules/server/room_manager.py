@@ -433,54 +433,34 @@ class Room:
                 traceback.print_exc()
                 raise
             except TimeoutError as e:
-                # API timeout - recoverable error, retry with backoff
-                print(f"[Room {self.room_id}] API timeout in message generation (attempt {attempts + 1}/{max_attempts}): {e}")
-                if attempts < max_attempts - 1:
-                    attempts += 1
-                    # Longer wait for timeout errors
-                    wait_time = min(2.0 * attempts, 10.0)  # Exponential backoff, max 10s
-                    print(f"[Room {self.room_id}] Retrying after {wait_time}s...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                else:
-                    print(f"[Room {self.room_id}] Max retries reached for timeout error")
-                    # Broadcast error to clients
-                    try:
-                        await self.broadcast_json({
-                            'type': 'error',
-                            'data': {'message': 'API调用超时，请稍后重试'}
-                        })
-                    except:
-                        pass
-                    return None, None
+                # API timeout - Gemini layer already retried, so this is a final failure
+                print(f"[Room {self.room_id}] API timeout after Gemini layer retries: {e}")
+                # Broadcast error to clients
+                try:
+                    await self.broadcast_json({
+                        'type': 'error',
+                        'data': {'message': 'API调用超时，请稍后重试'}
+                    })
+                except:
+                    pass
+                return None, None
             except Exception as e:
                 # Categorize errors
                 error_str = str(e).lower()
                 error_type = type(e).__name__
                 
-                # Check for timeout-related errors
-                is_timeout = (
-                    isinstance(e, TimeoutError) or 
-                    'timeout' in error_str or 
-                    'timed out' in error_str
-                )
-                
-                # Check for recoverable errors
-                is_recoverable = (
-                    is_timeout or
-                    any(keyword in error_str for keyword in [
-                        'network', 'connection', 'temporary', 'retry', 'rate limit',
-                        'service unavailable', '503', '502', '504'
-                    ])
-                )
+                # Check for recoverable errors (timeout is handled separately above, so not included here)
+                is_recoverable = any(keyword in error_str for keyword in [
+                    'network', 'connection', 'temporary', 'retry', 'rate limit',
+                    'service unavailable', '503', '502', '504'
+                ])
                 
                 if is_recoverable:
                     # Recoverable error - retry with backoff
                     print(f"[Room {self.room_id}] Recoverable error in message generation (attempt {attempts + 1}/{max_attempts}): {error_type}: {e}")
                     if attempts < max_attempts - 1:
                         attempts += 1
-                        # Longer wait for timeout errors
-                        wait_time = min(2.0 * attempts, 10.0) if is_timeout else min(1.0 * attempts, 5.0)
+                        wait_time = min(1.0 * attempts, 5.0)
                         print(f"[Room {self.room_id}] Retrying after {wait_time}s...")
                         await asyncio.sleep(wait_time)
                         continue
@@ -1058,13 +1038,19 @@ class Room:
 
                                  # 无论是否已回显，都确保消息被广播（统一消息格式）
                                  if not is_echoed:
+                                      # 获取 performer 对象用于获取图标等信息
+                                      performer = self.scrollweaver.server.performers.get(current_role_code)
+                                      icon_path = default_icon_path
+                                      if performer and hasattr(performer, 'icon_path') and performer.icon_path and os.path.exists(performer.icon_path) and is_image(performer.icon_path):
+                                          icon_path = performer.icon_path
+                                      
                                       # Broadcast echo to ALL with complete message format
                                       echo_msg = {
                                         'username': username,
                                         'type': 'role',
                                         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                         'text': user_text,
-                                        'icon': performer.icon_path if hasattr(performer, 'icon_path') and os.path.exists(performer.icon_path) and is_image(performer.icon_path) else default_icon_path,
+                                        'icon': icon_path,
                                         'uuid': original_uuid,
                                         'scene': self.scrollweaver.server.cur_round,
                                         'is_user': True,
