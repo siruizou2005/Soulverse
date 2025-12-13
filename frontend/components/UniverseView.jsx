@@ -53,7 +53,7 @@ export default function UniverseView({ user }) {
 
   useEffect(() => {
     if (!roomId) return; // Wait for room_id
-    
+
     // 重置初始化标志和状态
     initRef.current = false;
     setHasDigitalTwin(false);
@@ -61,15 +61,13 @@ export default function UniverseView({ user }) {
     setSelectedAgents([]);
     setRoomAgents([]);
     setUserAgents([]);
-    
+
     // 延迟一点再初始化，确保状态已重置
     const timer = setTimeout(() => {
       if (initRef.current) return; // 防止重复初始化
       initRef.current = true;
       checkDigitalTwin();
     }, 100);
-    
-    return () => clearTimeout(timer);
 
     // 初始化 WebSocket 连接（用于接收角色列表更新）
     // Use room-specific WebSocket URL
@@ -116,7 +114,9 @@ export default function UniverseView({ user }) {
       setWs(null);
     };
 
+    // Cleanup function: clear timer and close websocket
     return () => {
+      clearTimeout(timer);
       websocket.close();
     };
   }, [roomId]);
@@ -160,7 +160,7 @@ export default function UniverseView({ user }) {
               const userAgentsList = charactersResult.characters.filter(
                 char => char.role_code?.startsWith('digital_twin_user_')
               );
-              
+
               setRoomAgents(charactersResult.characters);
               setUserAgents(userAgentsList);
               setSelectedAgents([]); // 匹配列表保持为空，不显示匹配结果
@@ -392,14 +392,14 @@ export default function UniverseView({ user }) {
   const handleStartChat = async () => {
     console.log('handleStartChat called');
     console.log('房间模式:', isNewRoom ? '新建房间' : '加入已有房间');
-    
+
     setIsAddingAgents(true);
-    
+
     try {
       if (isNewRoom) {
         // 新建房间：添加用户agent + 选中的匹配agents
         console.log('新建房间模式：添加用户agent和选中的匹配agents');
-        
+
         // 1. 先恢复用户agent到沙盒
         console.log('恢复用户agent到沙盒...');
         try {
@@ -415,7 +415,7 @@ export default function UniverseView({ user }) {
           setIsAddingAgents(false);
           return;
         }
-        
+
         // 2. 添加选中的匹配agents（只添加未禁用的）
         const agentsToAdd = selectedAgents.filter(a => !a.disabled);
         if (agentsToAdd.length > 0) {
@@ -431,17 +431,14 @@ export default function UniverseView({ user }) {
       } else {
         // 加入已有房间：只添加用户agent，使用房间中已有的agents
         console.log('加入已有房间模式：只添加用户agent');
-        
-        // 检查房间中是否有预设agents
-        const presetAgents = roomAgents.filter(
-          a => !a.role_code?.startsWith('digital_twin_user_')
-        );
-        if (presetAgents.length === 0) {
-          alert('房间中没有agents，无法开始对话');
+
+        // 检查房间中是否有agents (只要有任何agent，包括其他用户，就可以加入)
+        if (roomAgents.length === 0) {
+          alert('房间中没有agents，无法加入对话');
           setIsAddingAgents(false);
           return;
         }
-        
+
         // 恢复用户agent到沙盒
         console.log('恢复用户agent到沙盒...');
         try {
@@ -458,7 +455,7 @@ export default function UniverseView({ user }) {
           return;
         }
       }
-      
+
       // 3. 更新房间agents列表
       try {
         const charactersResult = await api.getCharacters(roomId);
@@ -472,7 +469,7 @@ export default function UniverseView({ user }) {
       } catch (error) {
         console.error('更新房间agents列表失败:', error);
       }
-      
+
       // 4. 开始对话
       console.log('✓ 所有agents已添加，开始对话...');
       setChatStarted(true);
@@ -671,8 +668,18 @@ export default function UniverseView({ user }) {
             <button
               onClick={async () => {
                 const newId = Math.random().toString(36).substring(2, 8);
-                setIsNewRoom(true); // 标记为新建房间
-                setRoomId(newId);
+                try {
+                  const result = await api.createRoom(newId);
+                  if (result.success) {
+                    setIsNewRoom(true); // 标记为新建房间
+                    setRoomId(newId);
+                  } else {
+                    alert('创建房间失败: ' + (result.message || '未知错误'));
+                  }
+                } catch (error) {
+                  console.error('创建房间出错:', error);
+                  alert('创建房间出错');
+                }
               }}
               className="w-full py-4 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 rounded-xl font-bold text-lg shadow-lg shadow-cyan-500/20 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2"
             >
@@ -703,7 +710,7 @@ export default function UniverseView({ user }) {
               <button
                 onClick={async () => {
                   if (!roomInput.trim()) return;
-                  
+
                   // 检查房间是否存在
                   try {
                     const checkResult = await api.checkRoomExists(roomInput.trim());
@@ -890,7 +897,7 @@ export default function UniverseView({ user }) {
                       ? '已连接'
                       : (selectedAgents.length > 0 ? selectedAgents[0].name : '等待匹配')
                   ) : (
-                    roomAgents.length > 0 
+                    roomAgents.length > 0
                       ? `已加入房间 (${roomAgents.filter(a => !a.role_code?.startsWith('digital_twin_user_')).length} agents)`
                       : '已加入房间'
                   )
@@ -898,7 +905,7 @@ export default function UniverseView({ user }) {
               </h1>
               <button
                 onClick={handleStartChat}
-                disabled={isConnecting || isAddingAgents || (isNewRoom ? selectedAgents.filter(a => !a.disabled).length === 0 : roomAgents.filter(a => !a.role_code?.startsWith('digital_twin_user_')).length === 0)}
+                disabled={isConnecting || isAddingAgents || (isNewRoom ? selectedAgents.filter(a => !a.disabled).length === 0 : roomAgents.length === 0)}
                 className="mt-4 px-6 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-sm backdrop-blur-md transition-all flex items-center gap-2 mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isConnecting ? (

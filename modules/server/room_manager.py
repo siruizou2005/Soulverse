@@ -74,14 +74,7 @@ class Room:
         was_empty = self.last_empty_time is not None
         was_conversation_ended = self.conversation_ended
         
-        if was_empty or was_conversation_ended:
-            # 重置对话结束标志，恢复对话
-            self.last_empty_time = None
-            self.conversation_ended = False
-            print(f"[Room {self.room_id}] Client {client_id} connected, {'resuming' if was_conversation_ended else 'starting'} story loop")
-            # Ensure story loop is running
-            await self.start_story_loop()
-        
+
         if user_id:
             # 自动绑定用户数字孪生
             role_code = None
@@ -203,6 +196,15 @@ class Room:
             if user_id not in self.user_client_map:
                 self.user_client_map[user_id] = set()
             self.user_client_map[user_id].add(client_id)
+        
+        # Move start_story_loop to here, AFTER agent is added
+        if was_empty or was_conversation_ended:
+            # 重置对话结束标志，恢复对话
+            self.last_empty_time = None
+            self.conversation_ended = False
+            print(f"[Room {self.room_id}] Client {client_id} connected, {'resuming' if was_conversation_ended else 'starting'} story loop")
+            # Ensure story loop is running
+            await self.start_story_loop()
         
     async def disconnect(self, client_id: str):
         """断开客户端连接并清理相关状态"""

@@ -199,9 +199,20 @@ export const api = {
     return response.json();
   },
 
+  // 创建新房间
+  async createRoom(roomId) {
+    const response = await fetch(`${API_BASE}/create-room`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ room_id: roomId })
+    });
+    return response.json();
+  },
+
   // 获取房间中的agents列表
   async getCharacters(roomId = null) {
-    const url = roomId 
+    const url = roomId
       ? `${API_BASE}/characters?room_id=${roomId}`
       : `${API_BASE}/characters`;
     const response = await fetch(url, {

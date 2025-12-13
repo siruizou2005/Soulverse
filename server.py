@@ -1309,6 +1309,12 @@ async def restore_user_agent(request: Request):
         print(f"用户Agent已恢复到沙盒: {user_agent.nickname} ({role_code})")
         
         characters_info = room.scrollweaver.get_characters_info()
+        
+        # Broadcast update to notify all clients
+        await room.broadcast_json({
+            'type': 'characters_list',
+            'data': {'characters': characters_info}
+        })
 
         return {
             "success": True,
@@ -1325,6 +1331,30 @@ async def restore_user_agent(request: Request):
         raise
     except Exception as e:
         print(f"Error in restore_user_agent: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/create-room")
+async def create_room_endpoint(request: Request):
+    """显式创建房间"""
+    try:
+        data = await request.json()
+        room_id = data.get('room_id')
+        
+        if not room_id:
+            raise HTTPException(status_code=400, detail="Room ID is required")
+            
+        # create_room will return existing room if it exists, or create new one
+        room = room_manager.create_room(room_id)
+        
+        return {
+            "success": True,
+            "room_id": room.room_id,
+            "message": "Room created successfully"
+        }
+    except Exception as e:
+        print(f"Error creating room: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1430,6 +1460,12 @@ async def clear_preset_agents(request: Request):
         # 注意：不需要重置generator_initialized，agent移除会在下一个轮次生效
         
         characters_info = room.scrollweaver.get_characters_info()
+        
+        # Broadcast update
+        await room.broadcast_json({
+            'type': 'characters_list',
+            'data': {'characters': characters_info}
+        })
 
         return {
             "success": True,
