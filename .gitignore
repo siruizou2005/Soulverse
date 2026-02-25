@@ -46,3 +46,5 @@ next-env.d.ts
 
 /data/roles/
 /data/anime_images/
+/data/users/
+/experiment_saves/
