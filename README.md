@@ -376,22 +376,6 @@ Contributions are welcome!
 
 ---
 
-## Citation
-
-If you use this work, please cite:
-
-```bibtex
-@inproceedings{ran2025scrollweaver,
-  title={BOOKWORLD: From Novels to Interactive Agent Societies for Story Creation},
-  author={Ran, Yiting and Wang, Xintao and Qiu, Tian and Liang, Jiaqing and Xiao, Yanghua and Yang, Deqing},
-  booktitle={Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
-  pages={15898--15912},
-  year={2025}
-}
-```
-
----
-
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
@@ -400,7 +384,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ## Contact
 
-For questions, suggestions, or contributions: **alienet1109@163.com**
+For questions, suggestions, or contributions: **siruizou2005@gmail.com**
 
 ---
 
@@ -411,3 +395,4 @@ For questions, suggestions, or contributions: **alienet1109@163.com**
 [Get Started](#quick-start) · [API Docs](#api-reference) · [Contributing](#contributing)
 
 </div>
+
