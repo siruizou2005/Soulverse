@@ -377,22 +377,6 @@ python scripts/init_preset_npcs.py
 
 ---
 
-## 引用
-
-如果本项目对你有帮助，请引用：
-
-```bibtex
-@inproceedings{ran2025scrollweaver,
-  title={BOOKWORLD: From Novels to Interactive Agent Societies for Story Creation},
-  author={Ran, Yiting and Wang, Xintao and Qiu, Tian and Liang, Jiaqing and Xiao, Yanghua and Yang, Deqing},
-  booktitle={Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
-  pages={15898--15912},
-  year={2025}
-}
-```
-
----
-
 ## 许可证
 
 本项目采用 MIT 许可证，详见 [LICENSE](LICENSE) 文件。
@@ -401,7 +385,7 @@ python scripts/init_preset_npcs.py
 
 ## 联系方式
 
-如有任何问题、建议或想要贡献，请联系：**alienet1109@163.com**
+如有任何问题、建议或想要贡献，请联系：**siruizou2005@gmail.com**
 
 ---
 
@@ -412,3 +396,4 @@ python scripts/init_preset_npcs.py
 [快速开始](#快速开始) · [API 文档](#api-文档) · [贡献指南](#贡献指南)
 
 </div>
+
